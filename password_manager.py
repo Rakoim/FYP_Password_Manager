@@ -51,6 +51,9 @@ DB_FILE = "passwords.db"
 global add_button_ref
 add_button_ref = None
 
+# Global variable declaration
+item_context_menu = None
+
 # Global variable to track the last activity time
 last_activity_time = time.time()
 
@@ -574,114 +577,6 @@ def load_passwords():
             masked_password = '*' * 10  # Mask password with asterisks
             # Insert all the fields including the id
             tree.insert("", tk.END, values=(row[0], row[1], row[2], row[3], masked_password, row[5], row[6], row[7], row[8] , decrypted_password, row[9]))
-
-# Right-click context menu
-def show_context_menu(event):
-    context_menu.post(event.x_root, event.y_root)
-
-
-# Function to check if clipboard history is enabled
-def is_clipboard_history_enabled():
-    try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Clipboard")
-        value, _ = winreg.QueryValueEx(key, "EnableClipboardHistory")
-        winreg.CloseKey(key)
-        print(f"Clipboard history enabled: {value == 1}")
-        return value == 1
-    except Exception as e:
-        print(f"Failed to check clipboard history: {e}")
-        return False
-
-def copy_value(value):
-    try:
-        # Check if clipboard history is enabled
-        clipboard_history_enabled = is_clipboard_history_enabled()
-        
-        # Temporarily disable clipboard history if needed
-        if clipboard_history_enabled:
-            # PowerShell script to disable clipboard history
-            powershell_script = """
-            Invoke-Expression "cmd.exe /c echo | clip"
-            $RegPath = "HKCU:\\Software\\Microsoft\\Clipboard"
-            if (Test-Path $RegPath) {
-                Remove-Item -Path $RegPath -Recurse -Force -ErrorAction Stop
-                Write-Host "Clipboard history turned off." -ForegroundColor Green
-            } else {
-                Write-Host "Clipboard history not found. This feature may not be enabled on your system." -ForegroundColor Cyan
-            }
-            """
-
-            # Run the PowerShell script
-            process = subprocess.Popen(["powershell", "-Command", powershell_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            output, error = process.communicate()
-
-            if process.returncode == 0:
-                print("PowerShell script executed successfully.")
-                print(output.decode())
-            else:
-                print("Error executing PowerShell script.")
-                print(error.decode())
-
-            time.sleep(1)  # Add a small delay to ensure the setting takes effect
-        
-        # Open the clipboard
-        win32clipboard.OpenClipboard()
-        # Clear the clipboard
-        win32clipboard.EmptyClipboard()
-        # Set the clipboard text
-        win32clipboard.SetClipboardText(value)
-        # Close the clipboard
-        win32clipboard.CloseClipboard()
-        
-        messagebox.showinfo("Copied", "Value copied to clipboard!")
-        countdown(settings[4], clipboard_history_enabled)
-        
-    except Exception as e:
-        messagebox.showerror("Error", f"Failed to copy value: {e}")
-        
-def countdown(seconds, clipboard_history_enabled):
-    def update_countdown(remaining):
-        if remaining > 0:
-            timer_label.config(text=f"Copied item will be cleared in {remaining} seconds...")
-            root.after(1000, update_countdown, remaining - 1)
-        else:
-            # Clear the clipboard
-            try:
-                win32clipboard.OpenClipboard()
-                win32clipboard.EmptyClipboard()
-                win32clipboard.CloseClipboard()
-
-                # Re-enable clipboard history if it was initially enabled
-                if clipboard_history_enabled:
-                    # PowerShell script to enable clipboard history
-                    powershell_script = """
-                    $RegPath = "HKCU:\\Software\\Microsoft\\Clipboard"
-                    if (-not (Test-Path $RegPath)) {
-                        New-Item -Path $RegPath -Force
-                    }
-                    Set-ItemProperty -Path $RegPath -Name "EnableClipboardHistory" -Value 1
-                    Write-Host "Clipboard history enabled." -ForegroundColor Green
-                    """
-                    
-                    # Run the PowerShell script
-                    process = subprocess.Popen(["powershell", "-Command", powershell_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    output, error = process.communicate()
-
-                    if process.returncode == 0:
-                        print("PowerShell script executed successfully.")
-                        print(output.decode())
-                    else:
-                        print("Error executing PowerShell script.")
-                        print(error.decode())
-
-                timer_label.config(text="Clipboard cleared")
-                # Schedule clearing of the message after 3 seconds
-                root.after(3000, lambda: timer_label.config(text=""))
-
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to clear clipboard: {e}")
-
-    update_countdown(seconds)
 
 def open_password_generation_form(parent_window):
     if hasattr(open_password_generation_form, "password_config_window") and \
@@ -3122,12 +3017,303 @@ def show_home_content1():
     # Load existing passwords into the table
     load_passwords()
 
+# Function to show context menu for home items
+def show_item_context_menu(event, item_id, root):
+    global selected_item_id
+    selected_item_id = item_id
+    
+    # Find the item frame to select
+    for widget in items_container.winfo_children():
+        if hasattr(widget, 'password_id') and widget.password_id == item_id:
+            select_item(None, item_id, widget, root)
+            break
+    
+    # Check if item is in trash
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT isDeleted FROM passwords WHERE id = ?", (item_id,))
+    is_deleted = cursor.fetchone()[0]
+    conn.close()
+    
+    # Create context menu based on trash status
+    context_menu = Menu(root, tearoff=0)
+    
+    # Always include copy commands
+    context_menu.add_command(label="Copy Platform", command=lambda: copy_item_value('platform'))
+    context_menu.add_command(label="Copy Label", command=lambda: copy_item_value('label'))
+    context_menu.add_command(label="Copy Username", command=lambda: copy_item_value('username'))
+    context_menu.add_command(label="Copy Password", command=lambda: copy_item_value('password'))
+    context_menu.add_command(label="Copy URL", command=lambda: copy_item_value('url'))
+    context_menu.add_command(label="Copy Notes", command=lambda: copy_item_value('notes'))
+    context_menu.add_separator()
+    
+    if is_deleted:
+        # In trash: show restore and permanent delete
+        context_menu.add_command(label="Restore Entry", command=lambda: restore_selected_home_entry(root))
+        context_menu.add_command(label="Delete Permanently", command=lambda: delete_permanently_selected_home_entry(root))
+    else:
+        # Not in trash: show regular delete
+        context_menu.add_command(label="Delete Entry", command=lambda: delete_selected_home_entry(root))
+    
+    context_menu.post(event.x_root, event.y_root)
+
+def restore_selected_home_entry(root):
+    global selected_item_id
+    if not selected_item_id:
+        messagebox.showinfo("Info", "No item selected")
+        return
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            UPDATE passwords 
+            SET isDeleted = 0, deletedAt = NULL
+            WHERE id = ?
+        ''', (selected_item_id,))
+        conn.commit()
+        messagebox.showinfo("Success", "Entry restored")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to restore entry: {e}")
+    finally:
+        conn.close()
+    
+    # Refresh the view
+    selected_item_id = None
+    show_home_content(root)
+
+def delete_permanently_selected_home_entry(root):
+    global selected_item_id
+    if not selected_item_id:
+        messagebox.showinfo("Info", "No item selected")
+        return
+
+    # Confirm permanent deletion
+    if not messagebox.askyesno("Confirm Permanent Deletion", 
+                              "Are you sure you want to permanently delete this entry?\nThis action cannot be undone."):
+        return
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM passwords WHERE id = ?", (selected_item_id,))
+        conn.commit()
+        messagebox.showinfo("Success", "Entry permanently deleted")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to delete entry: {e}")
+    finally:
+        conn.close()
+    
+    # Refresh the view
+    selected_item_id = None
+    show_home_content(root)
+
+# Function to copy item values
+def copy_item_value(field):
+    global selected_item_id
+    if not selected_item_id:
+        messagebox.showinfo("Info", "No item selected")
+        return
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT platformName, platformLabel, platformUser, encryptedPassword, 
+               platformURL, platformNote, aes_bits 
+        FROM passwords WHERE id = ?
+    ''', (selected_item_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        messagebox.showerror("Error", "Item not found")
+        return
+
+    platform, label, username, encrypted_pw, url, notes, aes_bits = row
+
+    try:
+        if field == 'password':
+            value = decrypt_things(encrypted_pw, key, aes_bits)
+        elif field == 'platform':
+            value = platform
+        elif field == 'label':
+            value = label
+        elif field == 'username':
+            value = username
+        elif field == 'url':
+            value = url
+        elif field == 'notes':
+            value = notes
+        else:
+            value = ""
+            
+        copy_value(value)
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to get value: {e}")
+
+# Function to check if clipboard history is enabled
+def is_clipboard_history_enabled():
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Clipboard")
+        value, _ = winreg.QueryValueEx(key, "EnableClipboardHistory")
+        winreg.CloseKey(key)
+        print(f"Clipboard history enabled: {value == 1}")
+        return value == 1
+    except Exception as e:
+        print(f"Failed to check clipboard history: {e}")
+        return False
+
+def copy_value(value):
+    try:
+        # Check if clipboard history is enabled
+        clipboard_history_enabled = is_clipboard_history_enabled()
+        
+        # Temporarily disable clipboard history if needed
+        if clipboard_history_enabled:
+            # PowerShell script to disable clipboard history
+            powershell_script = """
+            Invoke-Expression "cmd.exe /c echo | clip"
+            $RegPath = "HKCU:\\Software\\Microsoft\\Clipboard"
+            if (Test-Path $RegPath) {
+                Remove-Item -Path $RegPath -Recurse -Force -ErrorAction Stop
+                Write-Host "Clipboard history turned off." -ForegroundColor Green
+            } else {
+                Write-Host "Clipboard history not found. This feature may not be enabled on your system." -ForegroundColor Cyan
+            }
+            """
+
+            # Run the PowerShell script
+            process = subprocess.Popen(["powershell", "-Command", powershell_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            output, error = process.communicate()
+
+            if process.returncode == 0:
+                print("PowerShell script executed successfully.")
+                print(output.decode())
+            else:
+                print("Error executing PowerShell script.")
+                print(error.decode())
+
+            time.sleep(1)  # Add a small delay to ensure the setting takes effect
+        
+        # Open the clipboard
+        win32clipboard.OpenClipboard()
+        # Clear the clipboard
+        win32clipboard.EmptyClipboard()
+        # Set the clipboard text
+        win32clipboard.SetClipboardText(value, win32clipboard.CF_UNICODETEXT)
+        # Close the clipboard
+        win32clipboard.CloseClipboard()
+        messagebox.showinfo("Copied", "Value copied to clipboard!")
+        countdown(settings[4], clipboard_history_enabled)
+        
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to copy value: {e}")
+        
+def countdown(seconds, clipboard_history_enabled):
+    def update_countdown(remaining):
+        if remaining > 0:
+            timer_label.config(text=f"Copied item will be cleared in {remaining} seconds...")
+            root.after(1000, update_countdown, remaining - 1)
+        else:
+            # Clear the clipboard
+            try:
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.CloseClipboard()
+
+                # Re-enable clipboard history if it was initially enabled
+                if clipboard_history_enabled:
+                    # PowerShell script to enable clipboard history
+                    powershell_script = """
+                    $RegPath = "HKCU:\\Software\\Microsoft\\Clipboard"
+                    if (-not (Test-Path $RegPath)) {
+                        New-Item -Path $RegPath -Force
+                    }
+                    Set-ItemProperty -Path $RegPath -Name "EnableClipboardHistory" -Value 1
+                    Write-Host "Clipboard history enabled." -ForegroundColor Green
+                    """
+                    
+                    # Run the PowerShell script
+                    process = subprocess.Popen(["powershell", "-Command", powershell_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    output, error = process.communicate()
+
+                    if process.returncode == 0:
+                        print("PowerShell script executed successfully.")
+                        print(output.decode())
+                    else:
+                        print("Error executing PowerShell script.")
+                        print(error.decode())
+
+                timer_label.config(text="Clipboard cleared")
+                # Schedule clearing of the message after 3 seconds
+                root.after(3000, lambda: timer_label.config(text=""))
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to clear clipboard: {e}")
+
+    update_countdown(seconds)
+
+# Delete entry for home content
+def delete_selected_home_entry(root):
+    global selected_item_id
+    if not selected_item_id:
+        messagebox.showinfo("Info", "No item selected")
+        return
+    
+    # Now soft-delete the entry
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            UPDATE passwords 
+            SET isDeleted = 1, deletedAt = datetime('now')
+            WHERE id = ?
+        ''', (selected_item_id,))
+        conn.commit()
+        messagebox.showinfo("Success", "Entry moved to trash")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to delete entry: {e}")
+    finally:
+        conn.close()
+    
+    # Refresh the view
+    selected_item_id = None
+    show_home_content(root)
+
+def select_item(e, id, item_frame, root):
+    global selected_item_widget, details_placeholder, selected_item_id, unsaved_changes
+
+    if not item_frame.winfo_exists():
+        return
+
+    # Check for unsaved changes before switching
+    if unsaved_changes and not confirm_discard_changes():
+        return
+        
+    # Reset unsaved changes when proceeding
+    unsaved_changes = False
+
+    if selected_item_widget and selected_item_widget.winfo_exists():
+        selected_item_widget.config(bg="#ffffff")
+
+    item_frame.config(bg="#e0f7fa")
+    selected_item_widget = item_frame
+    selected_item_id = id
+
+    # Remove details placeholder
+    details_placeholder.destroy()
+    show_password_details(root, id)
+
 # Global variable to track unsaved changes
 unsaved_changes = False
 
-def show_home_content():
+def show_home_content(root):
     global unsaved_changes, add_button_ref, timer_label, selected_item_frame, selected_item_widget, items_container, details_placeholder
+    global selected_item_id  # Add this
+    selected_item_id = None  # Reset selected item ID
     selected_item_widget = None  # Track selected widget
+    unsaved_changes = False
 
     # Hide the main scrollbar for home content
     toggle_scrollbar(False)
@@ -3202,27 +3388,51 @@ def show_home_content():
 
     # Function to filter items
     def filter_items(filter_type=None, filter_value=None):
-        global selected_item_widget
+        global unsaved_changes, selected_item_widget, selected_item_id, details_placeholder
+        
+        # Check for unsaved changes before proceeding
+        if unsaved_changes and not confirm_discard_changes():
+            return
+        
+        # Reset unsaved changes flag when proceeding
+        unsaved_changes = False
+        
+        # Reset selection
         selected_item_widget = None
-
-        # Clear existing items and placeholder
+        selected_item_id = None
+        
+        # Clear existing items
         for widget in items_container.winfo_children():
             widget.destroy()
+        
+        # Remove bottom frame from details_frame
+        for child in details_frame.winfo_children():
+            if isinstance(child, tk.Frame) and child.winfo_height() == 50:
+                child.destroy()
+        
+        # Clear details view and show placeholder
+        for widget in selected_item_frame.winfo_children():
+            widget.destroy()
+        
+        # Recreate the placeholder
+        details_placeholder = tk.Label(selected_item_frame, text="No item selected. Select an item to view details.",
+                                    bg="#ffffff", fg="#666666", font=("Arial", 10), wraplength=400)
+        details_placeholder.pack(expand=True, fill=tk.BOTH, padx=40, pady=40)
         
         # Fetch filtered items from database
         try:
             with sqlite3.connect(DB_FILE) as conn:
                 cursor = conn.cursor()
-                query = "SELECT id, platformName, platformUser, updatedAt, platformLabel FROM passwords"
+                query = "SELECT id, platformName, platformUser, updatedAt, platformLabel FROM passwords WHERE isDeleted = 0"
                 params = []
                 
                 if filter_type == "favorites":
-                    query += " WHERE isFavourite = 1"
+                    query += " AND isFavourite = 1"
                 elif filter_type == "type":
-                    query += " WHERE platformLabel = ?"
+                    query += " AND platformLabel = ?"
                     params.append(filter_value)
                 elif filter_type == "trash":
-                    query += " WHERE isDeleted= 1"
+                    query = "SELECT id, platformName, platformUser, updatedAt, platformLabel FROM passwords WHERE isDeleted = 1"
                 
                 query += " ORDER BY platformName"
                 cursor.execute(query, params)
@@ -3244,6 +3454,8 @@ def show_home_content():
     def create_item_widget(id, platform, username, modified, label):
         item_frame = tk.Frame(items_container, bg="#ffffff", bd=1, relief=tk.RIDGE)
         item_frame.pack(fill=tk.X, pady=0, padx=0, anchor="w")
+
+        item_frame.password_id = id
 
         content = tk.Frame(item_frame, bg="#ffffff")
         content.pack(fill=tk.BOTH, padx=10, pady=10)
@@ -3272,28 +3484,13 @@ def show_home_content():
                            font=("Arial", 8), anchor="w", justify="left")
         mod_label.pack(fill=tk.X, anchor="w")
        
-       # Make entire item clickable
+       # Make entire item clickable and right-clickable
         for widget in [item_frame, content, platform_label, user_mod_frame, user_label, mod_label]:
-            widget.bind("<Button-1>", lambda e, id=id, frame=item_frame: select_item(e, id, frame))
+            widget.bind("<Button-1>", lambda e, id=id, frame=item_frame: select_item(e, id, frame, root))
+            widget.bind("<Button-3>", lambda e, id=id: show_item_context_menu(e, id, root))
             if widget not in [item_frame, content]:  # Don't change cursor for container frames
                 widget.config(cursor="hand2")
-                
-    def select_item(e, id, item_frame):
-        global selected_item_widget, details_placeholder
-
-        if not item_frame.winfo_exists():
-            return
-
-        if selected_item_widget and selected_item_widget.winfo_exists():
-            selected_item_widget.config(bg="#ffffff")
-
-        item_frame.config(bg="#e0f7fa")
-        selected_item_widget = item_frame
-
-        # Remove details placeholder
-        details_placeholder.destroy()
-        show_password_details(id)
-
+            
     # Create sidebar filter buttons
     def create_filter_button(parent, text, command, is_header=False):
         if is_header:
@@ -3310,7 +3507,7 @@ def show_home_content():
         return btn
 
     # All items filter (header)
-    create_filter_button(sidebar_frame, "All items", 
+    create_filter_button(sidebar_frame, "All Entries", 
                         lambda: filter_items(), is_header=True)
     
     # Favorites filter
@@ -3364,7 +3561,41 @@ def show_home_content():
     # Initial load with all items
     filter_items()
 
-def show_password_details(password_id=None):
+# Add this function to create the fixed bottom frame
+def create_bottom_frame(parent, root, password_id, is_deleted, is_edit_mode, save_callback):
+    bottom_frame = tk.Frame(parent, bg="#f0f0f0", height=50, relief="sunken", bd=1)
+    bottom_frame.pack(side="bottom", fill="x", padx=0, pady=0)
+    bottom_frame.pack_propagate(False)  # Keep fixed height
+
+    # For items in trash
+    if is_deleted and password_id is not None:
+        restore_btn = tk.Button(bottom_frame, text="Restore", bg="#4CAF50", fg="white", 
+                               padx=20, pady=5, command=lambda: restore_selected_home_entry(root))
+        restore_btn.pack(side="left", padx=10, pady=5)
+
+        delete_perm_btn = tk.Button(bottom_frame, text="Delete Permanently", bg="#f44336", fg="white", 
+                                   padx=20, pady=5, command=lambda: delete_permanently_selected_home_entry(root))
+        delete_perm_btn.pack(side="left", padx=10, pady=5)
+    
+    # For normal items
+    else:
+        save_button = tk.Button(bottom_frame, text="Save", bg="#4CAF50", fg="white", padx=20, pady=5,
+                                command=save_callback)  # Use the callback
+        save_button.pack(side="left", padx=10, pady=5)
+        
+        cancel_button = tk.Button(bottom_frame, text="Cancel", bg="#f44336", fg="white", 
+                                padx=20, pady=5, command=on_cancel)
+        cancel_button.pack(side="left", padx=10, pady=5)
+        
+        # Only show delete button for existing items (not in add mode)
+        if password_id is not None:
+            delete_button = tk.Button(bottom_frame, text="Delete", bg="#ff9800", fg="white", 
+                                    padx=20, pady=5, command=lambda: delete_selected_home_entry(root))
+            delete_button.pack(side="left", padx=10, pady=5)
+
+    return bottom_frame
+
+def show_password_details(root, password_id=None):
     global unsaved_changes, selected_item_frame, details_frame
     
     # Check for unsaved changes if switching items
@@ -3373,6 +3604,11 @@ def show_password_details(password_id=None):
         
     # Reset unsaved changes flag when opening a new form
     unsaved_changes = False
+
+    # Remove existing bottom frames in details_frame
+    for child in details_frame.winfo_children():
+        if isinstance(child, tk.Frame) and child.winfo_height() == 50:  # Identify bottom frame
+            child.destroy()
 
     is_edit_mode = password_id is not None
 
@@ -3470,7 +3706,7 @@ def show_password_details(password_id=None):
     details_canvas.pack(side="left", fill="both", expand=True)
 
     # Title
-    title_text = "EDIT ITEM" if is_edit_mode else "ADD NEW ITEM"
+    title_text = "EDIT ENTRY" if is_edit_mode else "ADD NEW ENTRY"
     ttk.Label(scrollable_details_frame, text=title_text, font=("Arial", 10, "bold"), 
             style="Normal.TLabel").pack(fill='x', padx=20, pady=(0, 20))
 
@@ -3773,19 +4009,7 @@ def show_password_details(password_id=None):
             ])
             return
             
-        # For edit mode: compare current values with original values
-        current_values = {
-            'name': name_entry.get(),
-            'label': label_var.get(),
-            'user': user_entry.get(),
-            'password': pass_var.get(),
-            'confirm_password': confirm_pass_var.get(),
-            'url': url_entry.get(),
-            'notes': notes_text.get("1.0", "end-1c"),
-            'aes_bit': aes_bit_var.get(),
-            'mp_reprompt': mp_reprompt_var.get(),
-            'is_favourite': is_favourite_var.get()
-        }
+        current_values = collect_current_values()
         
         # Compare current values with original values
         unsaved_changes = current_values != original_values
@@ -3829,31 +4053,48 @@ def show_password_details(password_id=None):
     
     selected_item_frame.after_idle(perform_initial_comparison)
 
-    if is_edit_mode:
-        # Save Button for editing
-        save_button = tk.Button(buttons_frame, text="Save", bg="#4CAF50", fg="white", padx=20, pady=5,
-                                command=lambda: save_and_reset_flag(
-                                            password_id, name_entry.get(), label_var.get(),
-                                            user_entry.get(), pass_entry.get(), confirm_pass_entry.get(), 
-                                            url_entry.get(), notes_text.get("1.0", tk.END).strip(), int(aes_bit_var.get()),
-                                            mp_reprompt_var.get(), is_favourite_var.get()
-                              ))
-    else:
-        # Save Button for adding new
-        save_button = tk.Button(buttons_frame, text="Save", bg="#4CAF50", fg="white", padx=20, pady=5,
-                                command=lambda: save_and_reset_flag(
-                                            None, name_entry.get(), label_var.get(),
-                                            user_entry.get(), pass_entry.get(), confirm_pass_entry.get(), 
-                                            url_entry.get(), notes_text.get("1.0", tk.END).strip(), int(aes_bit_var.get()),
-                                            mp_reprompt_var.get(), is_favourite_var.get()
-                              ))
+    # Function to collect current values
+    def collect_current_values():
+        return {
+            'name': name_entry.get().strip(),
+            'label': label_var.get().strip(),
+            'user': user_entry.get().strip(),
+            'password': pass_var.get(),
+            'confirm_password': confirm_pass_var.get(),
+            'url': url_entry.get().strip(),
+            'notes': notes_text.get("1.0", "end-1c").strip(),
+            'aes_bit': aes_bit_var.get(),
+            'mp_reprompt': mp_reprompt_var.get(),
+            'is_favourite': is_favourite_var.get()
+        }
+    
+    # Create the bottom frame
+    is_deleted = row[11] if row else False
 
-    save_button.pack(side='left', padx=10, expand=True)
+    # Define save callback function
+    def save_callback():
+        current_vals = collect_current_values()
+        if is_edit_mode:
+            save_and_reset_flag(password_id, current_vals['name'], current_vals['label'],
+                            current_vals['user'], current_vals['password'], 
+                            current_vals['confirm_password'], current_vals['url'], 
+                            current_vals['notes'], int(current_vals['aes_bit']),
+                            current_vals['mp_reprompt'], current_vals['is_favourite'], 
+                            root=root)
+        else:
+            save_and_reset_flag(None, current_vals['name'], current_vals['label'],
+                            current_vals['user'], current_vals['password'], 
+                            current_vals['confirm_password'], current_vals['url'], 
+                            current_vals['notes'], int(current_vals['aes_bit']),
+                            current_vals['mp_reprompt'], current_vals['is_favourite'], 
+                            root=root)
 
-    # Cancel Button
-    cancel_button = tk.Button(buttons_frame, text="Cancel", bg="#f44336", fg="white", padx=20, pady=5,
-                            command=on_cancel)
-    cancel_button.pack(side='left', padx=10, expand=True)
+    # Create bottom frame with callback
+    bottom_frame = create_bottom_frame(details_frame, root, password_id, is_deleted, is_edit_mode, save_callback)
+
+    # Now pack the bottom_frame at the bottom of the screen.
+    details_frame.update_idletasks()  # Ensure the details_frame is fully drawn before packing
+    details_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
     def on_aes_bit_change(event, context):
         context["selected_aes_bit"].set(int(event.widget.get()))
@@ -3872,19 +4113,19 @@ def show_password_details(password_id=None):
     update_password_strength(ui_context)
 
 def open_add_password_form():
-    show_password_details()  # Call without password_id to enter add mode
+    show_password_details(root)  # Call without password_id to enter add mode
 
-def save_and_reset_flag(password_id, *args):
+def save_and_reset_flag(password_id, *args, root=None):
     """Save changes and reset unsaved flag"""
     global unsaved_changes
     if password_id is not None:
         if save_password_changes(password_id, *args):
             unsaved_changes = False
-            show_home_content()  # Only call show_home_content if save is successful
+            show_home_content(root)  # Only call show_home_content if save is successful
     else:
         if save_new_password(*args):
             unsaved_changes = False
-            show_home_content()  # Only call show_home_content if save is successful
+            show_home_content(root)  # Only call show_home_content if save is successful
 
 def on_cancel():
     """Handle cancel action with unsaved changes check"""
@@ -5813,7 +6054,7 @@ def main():
                 show_main_window()
 
         def show_main_window():
-            global root, canvas, scrollbar, scroll_enabled
+            global root, canvas, scrollbar, scroll_enabled, item_context_menu
             root = tk.Tk()
             root.protocol("WM_DELETE_WINDOW", on_closing)
             root.title("Password Manager")
@@ -5849,7 +6090,7 @@ def main():
             # Navigation options
             home_label = tk.Label(nav_bar, text="Home", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
             home_label.pack(side=tk.LEFT, padx=10)
-            home_label.bind("<Button-1>", lambda e: show_home_content())
+            home_label.bind("<Button-1>", lambda e: show_home_content(root))
 
             password_health_label = tk.Label(nav_bar, text="Password Health", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
             password_health_label.pack(side=tk.LEFT, padx=10)
@@ -5904,7 +6145,7 @@ def main():
 
             schedule_backups()
 
-            show_home_content()
+            show_home_content(root)
 
             # Start checking for inactivity
             check_inactivity()
