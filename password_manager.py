@@ -3121,14 +3121,24 @@ def show_home_content1():
 
     # Load existing passwords into the table
     load_passwords()
-    
+
+# Global variable to track unsaved changes
+unsaved_changes = False
+
 def show_home_content():
-    global add_button_ref, timer_label, selected_item_frame, selected_item_widget, items_container, details_placeholder
+    global unsaved_changes, add_button_ref, timer_label, selected_item_frame, selected_item_widget, items_container, details_placeholder
     selected_item_widget = None  # Track selected widget
 
     # Hide the main scrollbar for home content
     toggle_scrollbar(False)
     toggle_scrolling(False)
+
+    # Check for unsaved changes before proceeding
+    if unsaved_changes and not confirm_discard_changes():
+        return
+    
+    # Reset unsaved changes flag when navigating away
+    unsaved_changes = False
 
     # Clear existing widgets
     for widget in main_frame.winfo_children():
@@ -3355,7 +3365,15 @@ def show_home_content():
     filter_items()
 
 def show_password_details(password_id=None):
-    global selected_item_frame, details_frame
+    global unsaved_changes, selected_item_frame, details_frame
+    
+    # Check for unsaved changes if switching items
+    if unsaved_changes and not confirm_discard_changes():
+        return
+        
+    # Reset unsaved changes flag when opening a new form
+    unsaved_changes = False
+
     is_edit_mode = password_id is not None
 
     # First pack the details frame if it's not already visible
@@ -3420,6 +3438,10 @@ def show_password_details(password_id=None):
         threshold_val = 10000000
 
     conn.close()
+
+    # Create StringVars for password and confirm password fields
+    pass_var = tk.StringVar(value=decrypted_password)
+    confirm_pass_var = tk.StringVar(value=decrypted_password)
 
     # Style configurations
     normal_color = "#ffffff"
@@ -3504,8 +3526,7 @@ def show_password_details(password_id=None):
     
     pass_frame = tk.Frame(pass_row, bg=normal_color)
     pass_frame.pack(fill='x')
-    pass_entry = tk.Entry(pass_frame, width=30, show="•", relief="flat", bg=normal_color)
-    pass_entry.insert(0, decrypted_password)
+    pass_entry = tk.Entry(pass_frame, width=30, show="*", relief="flat", bg=normal_color, textvariable=pass_var)
     pass_entry.pack(side='left', fill='x', expand=True)
     
     # Show/Hide button
@@ -3558,8 +3579,7 @@ def show_password_details(password_id=None):
     tk.Label(confirm_lframe, text="*", fg="red", bg=normal_color).pack(side='left')
     confirm_pass_frame = tk.Frame(confirm_row, bg=normal_color)
     confirm_pass_frame.pack(fill='x')
-    confirm_pass_entry = tk.Entry(confirm_pass_frame, width=30, show="•", relief="flat", bg=normal_color)
-    confirm_pass_entry.insert(0, decrypted_password)
+    confirm_pass_entry = tk.Entry(confirm_pass_frame, width=30, show="•", relief="flat", bg=normal_color, textvariable=confirm_pass_var)
     confirm_pass_entry.pack(side='left', fill='x', expand=True)
     tk.Frame(scrollable_details_frame, height=1, bg="#cccccc").pack(fill='x', padx=20, pady=(0, 10))
     confirm_pass_entry.bind("<FocusIn>", lambda e: highlight_row(confirm_row, [confirm_pass_entry]))
@@ -3714,30 +3734,125 @@ def show_password_details(password_id=None):
     buttons_frame = tk.Frame(scrollable_details_frame, bg="#ffffff")
     buttons_frame.pack(pady=10, fill='x')
 
+    # --- Add this flag ---
+    initial_comparison_done = False
+
+    # --- Moved below trace setup ---
+    # Capture original values for comparison AFTER setting up traces
+    # MODIFIED: Initialize differently for add vs edit mode
+    original_values = {
+        'name': name_entry.get() if is_edit_mode else "",
+        'label': label_var.get() if is_edit_mode else "Work",
+        'user': user_entry.get() if is_edit_mode else "",
+        'password': pass_var.get() if is_edit_mode else "",
+        'confirm_password': confirm_pass_var.get() if is_edit_mode else "",
+        'url': url_entry.get() if is_edit_mode else "",
+        'notes': notes_text.get("1.0", "end-1c") if is_edit_mode else "",
+        'aes_bit': aes_bit_var.get() if is_edit_mode else "256",
+        'mp_reprompt': mp_reprompt_var.get() if is_edit_mode else False,
+        'is_favourite': is_favourite_var.get() if is_edit_mode else False
+    }
+
+    # Track changes in all input fields
+    def check_for_changes(*args):
+        global unsaved_changes
+        if not initial_comparison_done:
+            return
+            
+        # For add mode: any non-empty field sets the flag
+        if not is_edit_mode:
+            unsaved_changes = any([
+                name_entry.get().strip(),
+                user_entry.get().strip(),
+                pass_var.get().strip(),
+                confirm_pass_var.get().strip(),
+                url_entry.get().strip(),
+                notes_text.get("1.0", "end-1c").strip(),
+                mp_reprompt_var.get(),
+                is_favourite_var.get()
+            ])
+            return
+            
+        # For edit mode: compare current values with original values
+        current_values = {
+            'name': name_entry.get(),
+            'label': label_var.get(),
+            'user': user_entry.get(),
+            'password': pass_var.get(),
+            'confirm_password': confirm_pass_var.get(),
+            'url': url_entry.get(),
+            'notes': notes_text.get("1.0", "end-1c"),
+            'aes_bit': aes_bit_var.get(),
+            'mp_reprompt': mp_reprompt_var.get(),
+            'is_favourite': is_favourite_var.get()
+        }
+        
+        # Compare current values with original values
+        unsaved_changes = current_values != original_values
+    
+    # Bind to all input fields
+    for widget in [name_entry, user_entry, url_entry, notes_text, label_combobox]:
+        if isinstance(widget, tk.Text):
+            widget.bind("<<Modified>>", lambda e: check_for_changes())
+        else:
+            widget.bind("<KeyRelease>", lambda e: check_for_changes())
+
+    # Add trace bindings for the password variables
+    pass_var.trace_add("write", lambda *args: check_for_changes())
+    confirm_pass_var.trace_add("write", lambda *args: check_for_changes())
+    
+    # Bind to checkbuttons
+    mp_reprompt_var.trace_add("write", lambda *args: check_for_changes())
+    is_favourite_var.trace_add("write", lambda *args: check_for_changes())
+    
+    # Bind to comboboxes
+    label_combobox.bind("<<ComboboxSelected>>", lambda e: check_for_changes())
+    aes_bit_combobox.bind("<<ComboboxSelected>>", lambda e: check_for_changes())
+
+    # Schedule initial comparison after UI settles
+    def perform_initial_comparison():
+        nonlocal initial_comparison_done
+        # Update original_values to current state after initialization
+        original_values.update({
+            'name': name_entry.get(),
+            'label': label_var.get(),
+            'user': user_entry.get(),
+            'password': pass_var.get(),
+            'confirm_password': confirm_pass_var.get(),
+            'url': url_entry.get(),
+            'notes': notes_text.get("1.0", "end-1c"),
+            'aes_bit': aes_bit_var.get(),
+            'mp_reprompt': mp_reprompt_var.get(),
+            'is_favourite': is_favourite_var.get()
+        })
+        initial_comparison_done = True
+    
+    selected_item_frame.after_idle(perform_initial_comparison)
+
     if is_edit_mode:
         # Save Button for editing
         save_button = tk.Button(buttons_frame, text="Save", bg="#4CAF50", fg="white", padx=20, pady=5,
-                              command=lambda: save_password_changes(
-                                  password_id, name_entry.get(), label_var.get(),
-                                  user_entry.get(), pass_entry.get(), url_entry.get(),
-                                  notes_text.get("1.0", tk.END).strip(), int(aes_bit_var.get()),
-                                  mp_reprompt_var.get(), is_favourite_var.get()
+                                command=lambda: save_and_reset_flag(
+                                            password_id, name_entry.get(), label_var.get(),
+                                            user_entry.get(), pass_entry.get(), confirm_pass_entry.get(), 
+                                            url_entry.get(), notes_text.get("1.0", tk.END).strip(), int(aes_bit_var.get()),
+                                            mp_reprompt_var.get(), is_favourite_var.get()
                               ))
     else:
         # Save Button for adding new
         save_button = tk.Button(buttons_frame, text="Save", bg="#4CAF50", fg="white", padx=20, pady=5,
-                              command=lambda: save_new_password(
-                                  name_entry.get(), label_var.get(),
-                                  user_entry.get(), pass_entry.get(), url_entry.get(),
-                                  notes_text.get("1.0", tk.END).strip(), int(aes_bit_var.get()),
-                                  mp_reprompt_var.get(), is_favourite_var.get()
+                                command=lambda: save_and_reset_flag(
+                                            None, name_entry.get(), label_var.get(),
+                                            user_entry.get(), pass_entry.get(), confirm_pass_entry.get(), 
+                                            url_entry.get(), notes_text.get("1.0", tk.END).strip(), int(aes_bit_var.get()),
+                                            mp_reprompt_var.get(), is_favourite_var.get()
                               ))
 
     save_button.pack(side='left', padx=10, expand=True)
 
     # Cancel Button
     cancel_button = tk.Button(buttons_frame, text="Cancel", bg="#f44336", fg="white", padx=20, pady=5,
-                            command=lambda: details_frame.pack_forget())
+                            command=on_cancel)
     cancel_button.pack(side='left', padx=10, expand=True)
 
     def on_aes_bit_change(event, context):
@@ -3759,11 +3874,43 @@ def show_password_details(password_id=None):
 def open_add_password_form():
     show_password_details()  # Call without password_id to enter add mode
 
-def save_new_password(name, label, user, password, url, notes, aes_bits, mp_reprompt, is_favourite):
+def save_and_reset_flag(password_id, *args):
+    """Save changes and reset unsaved flag"""
+    global unsaved_changes
+    if password_id is not None:
+        if save_password_changes(password_id, *args):
+            unsaved_changes = False
+            show_home_content()  # Only call show_home_content if save is successful
+    else:
+        if save_new_password(*args):
+            unsaved_changes = False
+            show_home_content()  # Only call show_home_content if save is successful
+
+def on_cancel():
+    """Handle cancel action with unsaved changes check"""
+    global unsaved_changes
+    if not unsaved_changes or confirm_discard_changes():
+        details_frame.pack_forget()
+        unsaved_changes = False
+
+def confirm_discard_changes():
+    """Show confirmation dialog for unsaved changes"""
+    return messagebox.askyesno(
+        "Unsaved Changes",
+        "You have unsaved changes. Discard changes?",
+        icon='warning'
+    )
+
+def save_new_password(name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite):
     # Validation logic
-    if not name or not label or not user or not password:
+    if not name or not label or not user or not password or not confirm_password:
         messagebox.showerror("Error", "Please fill in all required fields")
-        return
+        return False  # Return False to prevent further actions
+    
+    # Validate that password and confirm password match
+    if password != confirm_password:
+        messagebox.showerror("Error", "Password and Confirm Password do not match")
+        return False
     
     # Encryption logic
     encrypted_password = encrypt_things(password, key, aes_bits)
@@ -3782,17 +3929,23 @@ def save_new_password(name, label, user, password, url, notes, aes_bits, mp_repr
         (name, label, user, encrypted_password, url, notes, current_time, current_time, aes_bits, mp_reprompt, is_favourite))
         conn.commit()
         messagebox.showinfo("Success", "Password saved successfully")
-        show_home_content()  # Refresh the list
+        return True  # Return success to trigger show_home_content
     except Exception as e:
         messagebox.showerror("Database Error", f"Error saving password: {str(e)}")
+        return False  # Return failure, prevent further actions
     finally:
         conn.close()
 
-def save_password_changes(password_id, name, label, user, password, url, notes, aes_bits, mp_reprompt, is_favourite):
+def save_password_changes(password_id, name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite):
     # Validation logic
-    if not name or not label or not user or not password:
+    if not name or not label or not user or not password or not confirm_password:
         messagebox.showerror("Error", "Please fill in all required fields")
-        return
+        return False  # Return False to prevent further actions
+    
+    # Validate that password and confirm password match
+    if password != confirm_password:
+        messagebox.showerror("Error", "Password and Confirm Password do not match")
+        return False
     
     # Encrypt the password before saving
     encrypted_password = encrypt_things(password, key, aes_bits)
@@ -3801,23 +3954,21 @@ def save_password_changes(password_id, name, label, user, password, url, notes, 
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(""" 
             UPDATE passwords 
             SET platformName = ?, platformLabel = ?, platformUser = ?, encryptedPassword = ?,
                 platformURL = ?, platformNote = ?, updatedAt = ?, aes_bits = ?, 
-                mp_reprompt = ?, isFavourite = ?
-            WHERE id = ?
+                mp_reprompt = ?, isFavourite = ? 
+            WHERE id = ? 
         """, (name, label, user, encrypted_password, url, notes, current_time, aes_bits, mp_reprompt, is_favourite, password_id))
         conn.commit()
-        conn.close()
-        
-        # Success message
         messagebox.showinfo("Success", "Password updated successfully")
-        
-        # Refresh the display
-        show_home_content()
+        return True  # Return success to trigger show_home_content
     except Exception as e:
         messagebox.showerror("Error", f"Failed to save changes: {str(e)}")
+        return False  # Return failure, prevent further actions
+    finally:
+        conn.close()
 
 def open_aes_evaluation_window(parent_window, current_password, aes_bit_var):
     eval_win = tk.Toplevel(parent_window)
