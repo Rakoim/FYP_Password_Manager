@@ -337,7 +337,7 @@ def verify_recovery_key(entered_key, hashed_recovery_keys):
     return entered_key_hash in hashed_recovery_keys
 
 def verify_otp(encrypted_otp_secret):
-    otp_secret = decrypt_things(encrypted_otp_secret, key)  # Decrypt the OTP secret
+    otp_secret = decrypt_things(encrypted_otp_secret, key, 256)  # Decrypt the OTP secret
 
     def submit_otp():
         entered_otp = otp_entry.get()
@@ -385,27 +385,40 @@ def verify_otp(encrypted_otp_secret):
     otp_window.wait_window()  # Wait until OTP window closes
     return otp_window.result
     
-# AES-256 encryption and decryption functions
-def encrypt_things(plain_text, key):
+# Encrypt with AES based on selected AES bit size (128, 192, 256)
+def encrypt_things(plain_text, key, aes_bits):
     iv = os.urandom(12)  # Generate a random 12-byte IV for GCM
-    cipher = Cipher(algorithms.AES(key), modes.GCM(iv), backend=default_backend())
+    if aes_bits == 128:
+        cipher = Cipher(algorithms.AES(key[:16]), modes.GCM(iv), backend=default_backend())  # 128-bit AES
+    elif aes_bits == 192:
+        cipher = Cipher(algorithms.AES(key[:24]), modes.GCM(iv), backend=default_backend())  # 192-bit AES
+    else:  # AES-256
+        cipher = Cipher(algorithms.AES(key), modes.GCM(iv), backend=default_backend())  # 256-bit AES
+
     encryptor = cipher.encryptor()
     encrypted_password = encryptor.update(plain_text.encode()) + encryptor.finalize()
     return base64.b64encode(iv + encryptor.tag + encrypted_password).decode('utf-8')
 
-def decrypt_things(encrypted_text, key):
+# Decrypt with AES based on selected AES bit size (128, 192, 256)
+def decrypt_things(encrypted_text, key, aes_bits):
     try:
         encrypted_data = base64.b64decode(encrypted_text)
         iv = encrypted_data[:12]  # First 12 bytes are the IV
         tag = encrypted_data[12:28]  # Next 16 bytes are the GCM tag
         ciphertext = encrypted_data[28:]  # Remaining bytes are the ciphertext
 
-        cipher = Cipher(algorithms.AES(key), modes.GCM(iv, tag), backend=default_backend())
+        if aes_bits == 128:
+            cipher = Cipher(algorithms.AES(key[:16]), modes.GCM(iv, tag), backend=default_backend())  # 128-bit AES
+        elif aes_bits == 192:
+            cipher = Cipher(algorithms.AES(key[:24]), modes.GCM(iv, tag), backend=default_backend())  # 192-bit AES
+        else:  # AES-256
+            cipher = Cipher(algorithms.AES(key), modes.GCM(iv, tag), backend=default_backend())  # 256-bit AES
+
         decryptor = cipher.decryptor()
         decrypted_password = decryptor.update(ciphertext) + decryptor.finalize()
         return decrypted_password.decode('utf-8')
     except Exception as e:
-        return None
+        return None  # Return None in case of decryption error
 
 # Database setup
 def setup_database():
@@ -544,7 +557,7 @@ def load_passwords():
     
     if records:
         for row in records:
-            decrypted_password = decrypt_things(row[4], key)  # Decrypt the password
+            decrypted_password = decrypt_things(row[4], key, row[8])  # Decrypt the password
             if decrypted_password is None:
                 global root, add_button_ref
                 messagebox.showerror("Invalid Password", "Incorrect master password. Please retry.")
@@ -3375,7 +3388,7 @@ def show_password_details(password_id=None):
 
             # Decrypt password
             try:
-                decrypted_password = decrypt_things(row[3], key)
+                decrypted_password = decrypt_things(row[3], key, row[8])
             except:
                 decrypted_password = "Error decrypting"
         else:
@@ -3753,7 +3766,7 @@ def save_new_password(name, label, user, password, url, notes, aes_bits, mp_repr
         return
     
     # Encryption logic
-    encrypted_password = encrypt_things(password, key)
+    encrypted_password = encrypt_things(password, key, aes_bits)
     
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -3782,7 +3795,7 @@ def save_password_changes(password_id, name, label, user, password, url, notes, 
         return
     
     # Encrypt the password before saving
-    encrypted_password = encrypt_things(password, key)
+    encrypted_password = encrypt_things(password, key, aes_bits)
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     try:
@@ -4371,7 +4384,7 @@ def show_password_health_content():
     def identify_password_issues():
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, platformName, platformLabel, platformUser, encryptedPassword, createdAt, updatedAt FROM passwords")
+        cursor.execute("SELECT id, platformName, platformLabel, platformUser, encryptedPassword, createdAt, updatedAt, aes_bits FROM passwords")
         passwords = cursor.fetchall()
         conn.close()
 
@@ -4380,7 +4393,7 @@ def show_password_health_content():
         reused_passwords = []
         breached_passwords = []
 
-        decrypted_passwords = [decrypt_things(pwd[4], key) for pwd in passwords]
+        decrypted_passwords = [decrypt_things(pwd[4], key, pwd[7]) for pwd in passwords]
 
         for i, pwd in enumerate(passwords):
             decrypted_password = decrypted_passwords[i]
@@ -4907,7 +4920,7 @@ def show_settings_content():
                 entered_otp = otp_entry.get()
                 totp = pyotp.TOTP(otp_secret)
                 if totp.verify(entered_otp):
-                    encrypted_otp_secret = encrypt_things(otp_secret, key)
+                    encrypted_otp_secret = encrypt_things(otp_secret, key, 256)
                     save_settings('mfa', True, show_mfa_settings)
                     save_settings('otp_secret', encrypted_otp_secret, show_mfa_settings)
                     messagebox.showinfo("Success", "MFA settings saved and verified.")
