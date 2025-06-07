@@ -47,53 +47,8 @@ import tracemalloc
 # Constants
 DB_FILE = "passwords.db"
 
-# Global variable to store the reference to the "Add" button
-global add_button_ref
-add_button_ref = None
-
-# Global variable declaration
-item_context_menu = None
-
 # Global variable to track the last activity time
 last_activity_time = time.time()
-
-def show_tooltip(widget, text):
-    global tooltip
-    hide_tooltip()
-    x = widget.winfo_rootx() + widget.winfo_width() + 10
-    y = widget.winfo_rooty() + 10
-
-    tooltip = tk.Toplevel(widget)
-    tooltip.wm_overrideredirect(True)
-    tooltip.wm_geometry(f"+{x}+{y}")
-    tooltip.configure(bg="#333333")
-
-    frame = tk.Frame(tooltip, bg="#333333", bd=0, highlightthickness=0)
-    frame.pack(padx=1, pady=1)
-
-    label = tk.Label(
-        frame,
-        text=text,
-        bg="#ffffff",
-        fg="#333333",
-        padx=10,
-        pady=6,
-        font=("Segoe UI", 10),
-        wraplength=200,
-        justify="left",
-        relief="flat",
-        bd=0
-    )
-    label.pack()
-
-    # Optional drop shadow effect
-    tooltip.lift()
-    tooltip.attributes("-topmost", True)
-
-def hide_tooltip():
-    global tooltip
-    if 'tooltip' in globals() and tooltip.winfo_exists():
-        tooltip.destroy()
 
 # Function to display setup welcome window before database creation
 def initial_setup():
@@ -170,7 +125,7 @@ def initial_setup():
     root.destroy()
 
     # Ask user to set master password
-    master_password = ask_initial_master_password()
+    master_password = ask_initial_master_password(root)
     if not master_password:
         messagebox.showerror("Error", "Master password is required.")
         return None
@@ -181,24 +136,22 @@ def reset_timer(event=None):
     global last_activity_time
     last_activity_time = time.time()
 
-def check_inactivity():
+def check_inactivity(root):
     global last_activity_time
     current_time = time.time()
     inactivity_period = current_time - last_activity_time
 
     if inactivity_period > settings[3]:  # settings[3] is the autologout time in seconds
-        lock_system()
+        lock_system(root)
 
-    root.after(1000, check_inactivity)  # Check every second
+    # Pass the function reference, not the function call
+    root.after(1000, lambda: check_inactivity(root))  # Check every second
 
-def lock_system():
-    global root, add_button_ref
-
+def lock_system(root):
     # Destroy existing main window if it exists
     if root:
         root.destroy()
         root = None
-        add_button_ref = None
 
     # Create a new root window for the lock screen
     lock_window = tk.Tk()
@@ -230,8 +183,46 @@ def unlock_session(lock_window):
     lock_window.destroy()
     main()  # Restart your main application
 
+def show_tooltip(widget, text):
+    global tooltip
+    hide_tooltip()
+    x = widget.winfo_rootx() + widget.winfo_width() + 10
+    y = widget.winfo_rooty() + 10
+
+    tooltip = tk.Toplevel(widget)
+    tooltip.wm_overrideredirect(True)
+    tooltip.wm_geometry(f"+{x}+{y}")
+    tooltip.configure(bg="#333333")
+
+    frame = tk.Frame(tooltip, bg="#333333", bd=0, highlightthickness=0)
+    frame.pack(padx=1, pady=1)
+
+    label = tk.Label(
+        frame,
+        text=text,
+        bg="#ffffff",
+        fg="#333333",
+        padx=10,
+        pady=6,
+        font=("Segoe UI", 10),
+        wraplength=200,
+        justify="left",
+        relief="flat",
+        bd=0
+    )
+    label.pack()
+
+    # Optional drop shadow effect
+    tooltip.lift()
+    tooltip.attributes("-topmost", True)
+
+def hide_tooltip():
+    global tooltip
+    if 'tooltip' in globals() and tooltip.winfo_exists():
+        tooltip.destroy()
+
 # Ask for the master password for the first time
-def ask_initial_master_password():
+def ask_initial_master_password(root):
     while True:
         master_password = simpledialog.askstring("Master Password", "Enter the master password:\t\t\t", show="*")
         if master_password is None:  # User pressed "Cancel" or closed the dialog
@@ -242,7 +233,7 @@ def ask_initial_master_password():
             return master_password
         
 # Ask for the master password
-def ask_master_password():
+def ask_master_password(root):
     while True:
         master_password = simpledialog.askstring("Master Password", "Enter the master password:", show="*")
         if master_password is None:  # User pressed "Cancel" or closed the dialog
@@ -254,7 +245,7 @@ def ask_master_password():
         else:
             return master_password
 
-def on_closing():
+def on_closing(root):
     if messagebox.askokcancel("Quit", "Do you want to quit?"):
         root.destroy()
         exit()
@@ -519,7 +510,7 @@ def setup_database():
     cursor.execute("SELECT COUNT(*) FROM settings")
     if cursor.fetchone()[0] == 0:
         cursor.execute('''INSERT INTO settings (mfa, alerts, backup, autologout, clipboard_timer, otp_secret, backup_path)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)''', (False, True, False, 600, 10, '', './Backup'))
+                        VALUES (?, ?, ?, ?, ?, ?, ?)''', (False, True, False, 3000, 10, '', './Backup'))
             
     # Insert default settings if not exists
     cursor.execute("SELECT COUNT(*) FROM attack_settings")
@@ -562,7 +553,7 @@ def load_passwords():
         for row in records:
             decrypted_password = decrypt_things(row[4], key, row[8])  # Decrypt the password
             if decrypted_password is None:
-                global root, add_button_ref
+                global root
                 messagebox.showerror("Invalid Password", "Incorrect master password. Please retry.")
                 
                 if root:
@@ -570,7 +561,6 @@ def load_passwords():
 
                 # Reset global references
                 root = None
-                add_button_ref = None
                 
                 # Restart application
                 main()
@@ -585,7 +575,7 @@ def open_password_generation_form(parent_window):
         open_password_generation_form.password_config_window.focus()
         return
 
-    password_config_window = tk.Toplevel(root)
+    password_config_window = tk.Toplevel(parent_window)
     password_config_window.title("Password Configuration")
     password_config_window.configure(bg="#f0f0f0")
     #password_config_window.transient(root)  # Stay on top of parent
@@ -1772,7 +1762,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
 
     # Initialize UI
     update_path_visibility()
-    
+
     # Center window
     attack_win.update_idletasks()
     width = attack_win.winfo_width()
@@ -2922,22 +2912,12 @@ def delete_selected_entry():
         messagebox.showinfo("Success", "Password entry deleted successfully!")
 
 def show_home_content1():
-    global tree, add_button_ref, context_menu, timer_label
+    global tree, context_menu, timer_label
 
     # Function to display home content
     for widget in main_frame.winfo_children():
         if widget != timer_label:  # Do not destroy the timer label
             widget.destroy()
-    
-    # Destroy any placeholders or other widgets in the navigation bar
-    for widget in nav_bar.winfo_children():
-        if isinstance(widget, tk.Frame) and widget["bg"] == "#333333":
-            widget.destroy()
-
-    # Destroy the existing "Add" button if it exists
-    if add_button_ref:
-        add_button_ref.destroy()  # Destroy the old button
-        add_button_ref = None     # Reset the global reference
 
     # Load and resize the icon for the "Add Password" button
     try:
@@ -2947,24 +2927,6 @@ def show_home_content1():
     except Exception as e:
         print(f"Error loading image: {e}")
         add_icon = None  # Fallback in case of error
-
-    # Add the "Add" button at the far right
-    if add_icon:
-        add_button = tk.Button(
-            nav_bar,
-            image=add_icon,
-            command=open_add_password_form,
-            bg="#333333",
-            borderwidth=0,
-            highlightthickness=0,
-            activebackground="#333333",
-            cursor="hand2"
-        )
-        add_button.image = add_icon  # Keep a reference to prevent garbage collection
-        add_button.pack(side=tk.RIGHT, padx=10)
-        add_button_ref = add_button  # Store reference globally
-    else:
-        print("Failed to load add button icon.")
 
     # Create frames
     frame_tree = tk.Frame(main_frame, bg="#f0f0f0")
@@ -3157,13 +3119,13 @@ def is_clipboard_history_enabled():
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Clipboard")
         value, _ = winreg.QueryValueEx(key, "EnableClipboardHistory")
         winreg.CloseKey(key)
-        print(f"Clipboard history enabled: {value == 1}")
+        # Clipboard history enabled
         return value == 1
     except Exception as e:
-        print(f"Failed to check clipboard history: {e}")
+        # Clipboard history disabled or not found
         return False
 
-def copy_value(value):
+def copy_value(value, root):
     try:
         # Check if clipboard history is enabled
         clipboard_history_enabled = is_clipboard_history_enabled()
@@ -3204,12 +3166,12 @@ def copy_value(value):
         # Close the clipboard
         win32clipboard.CloseClipboard()
         messagebox.showinfo("Copied", "Value copied to clipboard!")
-        countdown(settings[4], clipboard_history_enabled)
+        countdown(settings[4], clipboard_history_enabled, root)
         
     except Exception as e:
         messagebox.showerror("Error", f"Failed to copy value: {e}")
         
-def countdown(seconds, clipboard_history_enabled):
+def countdown(seconds, clipboard_history_enabled, root):
     def update_countdown(remaining):
         if remaining > 0:
             timer_label.config(text=f"Copied item will be cleared in {remaining} seconds...")
@@ -3308,8 +3270,11 @@ def select_item(e, id, item_frame, root):
 # Global variable to track unsaved changes
 unsaved_changes = False
 
-def show_home_content(root):
-    global unsaved_changes, add_button_ref, timer_label, selected_item_frame, selected_item_widget, items_container, details_placeholder
+# Global variable declaration
+item_context_menu = None
+
+def show_home_content(root):   
+    global unsaved_changes, timer_label, selected_item_frame, selected_item_widget, items_container, details_placeholder, main_frame
     global selected_item_id  # Add this
     selected_item_id = None  # Reset selected item ID
     selected_item_widget = None  # Track selected widget
@@ -3317,7 +3282,7 @@ def show_home_content(root):
 
     # Hide the main scrollbar for home content
     toggle_scrollbar(False)
-    toggle_scrolling(False)
+    toggle_scrolling(False, root)
 
     # Check for unsaved changes before proceeding
     if unsaved_changes and not confirm_discard_changes():
@@ -3326,64 +3291,176 @@ def show_home_content(root):
     # Reset unsaved changes flag when navigating away
     unsaved_changes = False
 
+    # Initialize current filter state
+    current_filter_type = None
+    current_filter_value = None
+
     # Clear existing widgets
     for widget in main_frame.winfo_children():
         if widget != timer_label:
             widget.destroy()
 
-    for widget in nav_bar.winfo_children():
-        if isinstance(widget, tk.Frame) and widget["bg"] == "#333333":
+    try:
+        add_icon_path = "Images/add_b.png"
+        if os.path.exists(add_icon_path):
+            original_icon = Image.open(add_icon_path)
+            resized_icon = original_icon.resize((30, 30))
+            add_icon = ImageTk.PhotoImage(resized_icon)
+        else:
+            add_icon = None
+    except Exception as e:
+        print(f"Error loading add icon: {e}")
+        add_icon = None
+    
+    try:
+        search_icon_path = "Images/search_b.png"
+        if os.path.exists(search_icon_path):
+            original_search_icon = Image.open(search_icon_path)
+            resized_search_icon = original_search_icon.resize((30, 30))
+            search_icon = ImageTk.PhotoImage(resized_search_icon)
+        else:
+            search_icon = None
+    except Exception as e:
+        print(f"Error loading search icon: {e}")
+        search_icon = None
+
+    # Create main container
+    main_container = tk.Frame(main_frame, bg="#f0f0f0")
+    main_container.pack(fill=tk.BOTH, expand=True)
+    main_container.config(width=root.winfo_width(), height=root.winfo_height() - 70)  # Dynamically update container size
+    main_container.pack_propagate(False)  # Prevent the frame from resizing to fit its contents
+
+    # Sidebar frame - MODIFIED: added expand=True and changed fill to BOTH
+    sidebar_frame = tk.Frame(main_container, width=200, bg="#2c3e50", bd=1, relief=tk.SOLID)
+    sidebar_frame.pack(side=tk.LEFT, fill=tk.BOTH)
+
+    # Content frame - already good
+    content_frame = tk.Frame(main_container, bg="#f0f0f0")
+    content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    # Add search bar and icons at the top of content_frame
+    search_frame = tk.Frame(content_frame, bg="#f0f0f0")
+    search_frame.pack(side=tk.TOP, fill=tk.X, pady=10)
+
+    # Create the search bar and search icon
+    search_entry = tk.Entry(search_frame, bg="#ffffff", font=("Arial", 10), width=30)
+    search_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+
+    if search_icon:
+        search_button = tk.Button(search_frame, image=search_icon, bg="#f0f0f0", borderwidth=0, highlightthickness=0,
+                                  activebackground="#f0f0f0", cursor="hand2")
+        search_button.image = search_icon
+        search_button.pack(side=tk.LEFT)
+
+    # Create clear 'X' icon button
+    def clear_search():
+        search_entry.delete(0, tk.END)
+        search_function()  # Re-trigger search when cleared
+
+    clear_icon = Image.open("Images/clear_b.png")  # Replace with the actual path to the 'X' icon image
+    clear_icon_resized = clear_icon.resize((20, 20))
+    clear_icon = ImageTk.PhotoImage(clear_icon_resized)
+
+    clear_button = tk.Button(search_frame, image=clear_icon, command=clear_search, bg="#f0f0f0", borderwidth=0,
+                             highlightthickness=0, activebackground="#f0f0f0", cursor="hand2")
+    clear_button.image = clear_icon
+    clear_button.pack(side=tk.RIGHT, padx=5)
+    clear_button.pack_forget()  # Hide the clear button initially
+
+    # Define the search function
+    def search_function(event=None):
+        search_query = search_entry.get().strip().lower()
+
+        # Show or hide the clear button based on whether there is input
+        if search_query:
+            clear_button.pack(side=tk.RIGHT, padx=5)  # Show clear button
+        else:
+            clear_button.pack_forget()  # Hide clear button
+
+        # Clear current items and selection
+        for widget in items_container.winfo_children():
             widget.destroy()
 
-    if add_button_ref:
-        add_button_ref.destroy()
-        add_button_ref = None
+        selected_item_widget = None
+        selected_item_id = None
+        for child in details_frame.winfo_children():
+            if isinstance(child, tk.Frame) and child.winfo_height() == 50:
+                child.destroy()
+        for widget in selected_item_frame.winfo_children():
+            widget.destroy()
 
-    try:
-        original_icon = Image.open("Images/add_w.png")
-        resized_icon = original_icon.resize((30, 30))
-        add_icon = ImageTk.PhotoImage(resized_icon)
-    except Exception as e:
-        print(f"Error loading image: {e}")
-        add_icon = None
+        details_placeholder = tk.Label(selected_item_frame,
+                                       text="No item selected. Select an item to view details.",
+                                       bg="#ffffff", fg="#666666",
+                                       font=("Arial", 10), wraplength=400)
+        details_placeholder.pack(expand=True, fill=tk.BOTH, padx=40, pady=40)
 
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                cursor = conn.cursor()
+                query = """
+                    SELECT id, platformName, platformUser, updatedAt, platformLabel 
+                    FROM passwords 
+                    WHERE isDeleted = 0
+                    AND (LOWER(platformName) LIKE ? 
+                    OR LOWER(platformLabel) LIKE ? 
+                    OR LOWER(platformUser) LIKE ? 
+                    OR LOWER(updatedAt) LIKE ?)
+                    ORDER BY platformName
+                """
+                pattern = f"%{search_query}%"
+                cursor.execute(query, (pattern, pattern, pattern, pattern))
+                passwords = cursor.fetchall()
+
+                if passwords:
+                    for pwd in passwords:
+                        create_item_widget(*pwd)
+                else:
+                    placeholder = tk.Label(
+                        items_container,
+                        text="No matching items found.",
+                        bg="#ffffff", fg="#666666",
+                        font=("Arial", 10), wraplength=200
+                    )
+                    placeholder.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        except sqlite3.Error as e:
+            print(f"Database error during search: {e}")
+            messagebox.showerror("Search Error", "Failed to perform search")
+
+    # Bind the search bar to automatically trigger the search when typing
+    search_entry.bind("<KeyRelease>", search_function)
+
+    # Create add button with icon and pack it to the far right
     if add_icon:
-        add_button = tk.Button(nav_bar, image=add_icon, command=open_add_password_form,
-                             bg="#333333", borderwidth=0, highlightthickness=0,
-                             activebackground="#333333", cursor="hand2")
-        add_button.image = add_icon  # Keep reference to prevent garbage collection
+        add_button = tk.Button(search_frame, image=add_icon, command=lambda: open_add_password_form(root),
+                             bg="#f0f0f0", borderwidth=0, highlightthickness=0,
+                             activebackground="#f0f0f0", cursor="hand2")
+        add_button.image = add_icon
         add_button.pack(side=tk.RIGHT, padx=10)
-        add_button_ref = add_button
-
-    main_container = tk.Frame(main_frame, bg="#f0f0f0")
-    main_container.pack(fill=tk.BOTH, expand=True)  # Ensure container expands
-
-    sidebar_frame = tk.Frame(main_container, width=200, bg="#2c3e50")
-    sidebar_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
-
-    content_frame = tk.Frame(main_container, bg="#f0f0f0")
-    content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)  # Make content frame expandable
-
-    # Items list
+    
+    # Items list frame setup - MODIFIED: added expand=True
     items_list_frame = tk.Frame(content_frame, bg="#ffffff", bd=1, relief=tk.SOLID)
     items_list_frame.pack(side=tk.LEFT, fill=tk.BOTH)
 
-    # Details frame with placeholder
+    # Details frame setup - MODIFIED: added expand=True
     global details_frame
     details_frame = tk.Frame(content_frame, bg="#ffffff", bd=1, relief=tk.SOLID)
     details_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+    # Selected item frame - already good
     selected_item_frame = tk.Frame(details_frame, bg="#ffffff")
     selected_item_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-    # Add placeholder for details frame
+    # Details placeholder - same format as filled items
     details_placeholder = tk.Label(selected_item_frame, text="No item selected. Select an item to view details.",
-                                  bg="#ffffff", fg="#666666", font=("Arial", 10), wraplength=400)
+                                   bg="#ffffff", fg="#666666", font=("Arial", 10), wraplength=400)
     details_placeholder.pack(expand=True, fill=tk.BOTH, padx=40, pady=40)
 
-    def on_sidebar_enter(e): 
+    def on_sidebar_enter(e):
         e.widget.config(bg="#34495e", cursor="hand2")
-    def on_sidebar_leave(e): 
+
+    def on_sidebar_leave(e):
         e.widget.config(bg="#2c3e50")
 
     # Function to filter items
@@ -3453,8 +3530,7 @@ def show_home_content(root):
 
     def create_item_widget(id, platform, username, modified, label):
         item_frame = tk.Frame(items_container, bg="#ffffff", bd=1, relief=tk.RIDGE)
-        item_frame.pack(fill=tk.X, pady=0, padx=0, anchor="w")
-
+        item_frame.pack(fill=tk.BOTH, pady=0, padx=0, anchor="w")
         item_frame.password_id = id
 
         content = tk.Frame(item_frame, bg="#ffffff")
@@ -3556,42 +3632,45 @@ def show_home_content(root):
     items_canvas.configure(yscrollcommand=scrollbar.set)
 
     scrollbar.pack(side="right", fill="y")
-    items_canvas.pack(side="left", fill=tk.BOTH, expand=True)  # Make canvas expandable
+    items_canvas.pack(side="left", fill="both", expand=True)  # Make canvas expandable
 
     # Initial load with all items
     filter_items()
 
-# Add this function to create the fixed bottom frame
 def create_bottom_frame(parent, root, password_id, is_deleted, is_edit_mode, save_callback):
     bottom_frame = tk.Frame(parent, bg="#f0f0f0", height=50, relief="sunken", bd=1)
     bottom_frame.pack(side="bottom", fill="x", padx=0, pady=0)
     bottom_frame.pack_propagate(False)  # Keep fixed height
 
+    # Create a container frame for buttons on the right side
+    button_container = tk.Frame(bottom_frame, bg="#f0f0f0")
+    button_container.pack(side=tk.RIGHT, padx=10, pady=5)
+
     # For items in trash
     if is_deleted and password_id is not None:
-        restore_btn = tk.Button(bottom_frame, text="Restore", bg="#4CAF50", fg="white", 
+        restore_btn = tk.Button(button_container, text="Restore", bg="#4CAF50", fg="white", 
                                padx=20, pady=5, command=lambda: restore_selected_home_entry(root))
-        restore_btn.pack(side="left", padx=10, pady=5)
+        restore_btn.pack(side=tk.RIGHT, padx=10)
 
-        delete_perm_btn = tk.Button(bottom_frame, text="Delete Permanently", bg="#f44336", fg="white", 
+        delete_perm_btn = tk.Button(button_container, text="Delete Permanently", bg="#f44336", fg="white", 
                                    padx=20, pady=5, command=lambda: delete_permanently_selected_home_entry(root))
-        delete_perm_btn.pack(side="left", padx=10, pady=5)
+        delete_perm_btn.pack(side=tk.RIGHT, padx=10)
     
     # For normal items
     else:
-        save_button = tk.Button(bottom_frame, text="Save", bg="#4CAF50", fg="white", padx=20, pady=5,
+        save_button = tk.Button(button_container, text="Save", bg="#4CAF50", fg="white", padx=20, pady=5,
                                 command=save_callback)  # Use the callback
-        save_button.pack(side="left", padx=10, pady=5)
+        save_button.pack(side=tk.RIGHT, padx=10)
         
-        cancel_button = tk.Button(bottom_frame, text="Cancel", bg="#f44336", fg="white", 
+        cancel_button = tk.Button(button_container, text="Cancel", bg="#f44336", fg="white", 
                                 padx=20, pady=5, command=on_cancel)
-        cancel_button.pack(side="left", padx=10, pady=5)
+        cancel_button.pack(side=tk.RIGHT, padx=10)
         
         # Only show delete button for existing items (not in add mode)
         if password_id is not None:
-            delete_button = tk.Button(bottom_frame, text="Delete", bg="#ff9800", fg="white", 
+            delete_button = tk.Button(button_container, text="Delete", bg="#ff9800", fg="white", 
                                     padx=20, pady=5, command=lambda: delete_selected_home_entry(root))
-            delete_button.pack(side="left", padx=10, pady=5)
+            delete_button.pack(side=tk.RIGHT, padx=10)
 
     return bottom_frame
 
@@ -3717,9 +3796,36 @@ def show_password_details(root, password_id=None):
     label_frame.pack(anchor='w')
     ttk.Label(label_frame, text="Platform Name:", style="Normal.TLabel").pack(side='left')
     tk.Label(label_frame, text="*", fg="red", bg=normal_color).pack(side='left')
-    name_entry = tk.Entry(name_row, fg="#000000", bg=normal_color, relief="flat")
+    
+    name_frame = tk.Frame(name_row, bg=normal_color)
+    name_frame.pack(fill='x')
+    name_entry = tk.Entry(name_frame, fg="#000000", bg=normal_color, relief="flat")
     name_entry.insert(0, row[0] if row[0] else "")
-    name_entry.pack(fill='x')
+    name_entry.pack(side='left', fill='x', expand=True)
+    
+    # Add copy button for name field
+    if is_edit_mode:
+        try:
+            copy_icon = tk.PhotoImage(file="Images/copy_b.png").subsample(3, 3)
+            name_copy_btn = tk.Button(name_frame, image=copy_icon, bg=normal_color, bd=0)
+            name_copy_btn.pack(side='left', padx=5)
+            name_copy_btn.bind("<Button-1>", lambda e: copy_value(name_entry.get(), root))
+            name_copy_btn.bind("<Enter>", lambda e: show_tooltip(e.widget, "Copy platform name"))
+            name_copy_btn.bind("<Leave>", lambda e: hide_tooltip())
+            name_copy_btn.image = copy_icon
+        except:
+            pass
+        
+        # Add context menu for name field
+        def name_context_menu(e):
+            menu = tk.Menu(root, tearoff=0)
+            menu.add_command(label="Copy", command=lambda: copy_value(name_entry.get(), root))
+            menu.add_command(label="Empty", command=lambda: name_entry.delete(0, tk.END))
+            menu.tk_popup(e.x_root, e.y_root)
+        
+        name_entry.bind("<Button-3>", name_context_menu)
+        name_entry.bind("<Control-c>", lambda e: copy_value(name_entry.get(), root))
+    
     tk.Frame(scrollable_details_frame, height=1, bg="#cccccc").pack(fill='x', padx=20, pady=(0, 10))
     name_entry.bind("<FocusIn>", lambda e: highlight_row(name_row, [name_entry]))
     name_entry.bind("<FocusOut>", lambda e: reset_row(name_row, [name_entry]))
@@ -3745,9 +3851,36 @@ def show_password_details(root, password_id=None):
     user_lframe.pack(anchor='w')
     ttk.Label(user_lframe, text="Username:", style="Normal.TLabel").pack(side='left')
     tk.Label(user_lframe, text="*", fg="red", bg=normal_color).pack(side='left')
-    user_entry = tk.Entry(user_row, fg="#000000", bg=normal_color, relief="flat")
+    
+    user_frame = tk.Frame(user_row, bg=normal_color)
+    user_frame.pack(fill='x')
+    user_entry = tk.Entry(user_frame, fg="#000000", bg=normal_color, relief="flat")
     user_entry.insert(0, row[2] if row[2] else "")
-    user_entry.pack(fill='x')
+    user_entry.pack(side='left', fill='x', expand=True)
+    
+    # Add copy button for username field
+    if is_edit_mode:
+        try:
+            copy_icon = tk.PhotoImage(file="Images/copy_b.png").subsample(3, 3)
+            user_copy_btn = tk.Button(user_frame, image=copy_icon, bg=normal_color, bd=0)
+            user_copy_btn.pack(side='left', padx=5)
+            user_copy_btn.bind("<Button-1>", lambda e: copy_value(user_entry.get(), root))
+            user_copy_btn.bind("<Enter>", lambda e: show_tooltip(e.widget, "Copy username"))
+            user_copy_btn.bind("<Leave>", lambda e: hide_tooltip())
+            user_copy_btn.image = copy_icon
+        except:
+            pass
+        
+        # Add context menu for username field
+        def user_context_menu(e):
+            menu = tk.Menu(root, tearoff=0)
+            menu.add_command(label="Copy", command=lambda: copy_value(user_entry.get(), root))
+            menu.add_command(label="Empty", command=lambda: user_entry.delete(0, tk.END))
+            menu.tk_popup(e.x_root, e.y_root)
+        
+        user_entry.bind("<Button-3>", user_context_menu)
+        user_entry.bind("<Control-c>", lambda e: copy_value(user_entry.get(), root))
+    
     tk.Frame(scrollable_details_frame, height=1, bg="#cccccc").pack(fill='x', padx=20, pady=(0, 10))
     user_entry.bind("<FocusIn>", lambda e: highlight_row(user_row, [user_entry]))
     user_entry.bind("<FocusOut>", lambda e: reset_row(user_row, [user_entry]))
@@ -3759,12 +3892,12 @@ def show_password_details(root, password_id=None):
     pass_lframe.pack(anchor='w')
     ttk.Label(pass_lframe, text="Password:", style="Normal.TLabel").pack(side='left')
     tk.Label(pass_lframe, text="*", fg="red", bg=normal_color).pack(side='left')
-    
+
     pass_frame = tk.Frame(pass_row, bg=normal_color)
     pass_frame.pack(fill='x')
     pass_entry = tk.Entry(pass_frame, width=30, show="*", relief="flat", bg=normal_color, textvariable=pass_var)
     pass_entry.pack(side='left', fill='x', expand=True)
-    
+
     # Show/Hide button
     show_icon = tk.PhotoImage(file="Images/show_password_b.png").subsample(3, 3)
     hide_icon = tk.PhotoImage(file="Images/hide_password_b.png").subsample(3, 3)
@@ -3773,7 +3906,7 @@ def show_password_details(root, password_id=None):
     show_btn.bind("<Button-1>", lambda e: toggle_password_visibility(pass_entry, confirm_pass_entry, show_btn, show_icon, hide_icon))
     show_btn.bind("<Enter>", lambda e: show_tooltip(e.widget, "Toggle password visibility"))
     show_btn.bind("<Leave>", lambda e: hide_tooltip())
-    
+
     # Breach check button
     breach_icon = tk.PhotoImage(file="Images/breach_check_b.png").subsample(3, 3)
     breach_btn = tk.Button(pass_frame, image=breach_icon, bg=normal_color, bd=0)
@@ -3781,7 +3914,7 @@ def show_password_details(root, password_id=None):
     breach_btn.bind("<Button-1>", lambda e: perform_breach_check(pass_entry.get(), scrollable_details_frame))
     breach_btn.bind("<Enter>", lambda e: show_tooltip(e.widget, "Check if password has been breached"))
     breach_btn.bind("<Leave>", lambda e: hide_tooltip())
-	
+
     # Generate password button
     generate_icon = tk.PhotoImage(file="Images/generate_password_b.png").subsample(3, 3)
     generate_btn = tk.Button(pass_frame, image=generate_icon, bg=normal_color, bd=0)
@@ -3789,7 +3922,30 @@ def show_password_details(root, password_id=None):
     generate_btn.bind("<Button-1>", lambda e: show_generate_menu())
     generate_btn.bind("<Enter>", lambda e: show_tooltip(e.widget, "Generate a secure password"))
     generate_btn.bind("<Leave>", lambda e: hide_tooltip())
-    
+
+    # Add copy button for password field (placed AFTER generate button)
+    if is_edit_mode:
+        try:
+            copy_icon = tk.PhotoImage(file="Images/copy_b.png").subsample(3, 3)
+            pass_copy_btn = tk.Button(pass_frame, image=copy_icon, bg=normal_color, bd=0)
+            pass_copy_btn.pack(side='left', padx=5)
+            pass_copy_btn.bind("<Button-1>", lambda e: copy_value(pass_var.get(), root))
+            pass_copy_btn.bind("<Enter>", lambda e: show_tooltip(e.widget, "Copy password"))
+            pass_copy_btn.bind("<Leave>", lambda e: hide_tooltip())
+            pass_copy_btn.image = copy_icon
+        except:
+            pass
+        
+        # Add context menu for password field
+        def pass_context_menu(e):
+            menu = tk.Menu(root, tearoff=0)
+            menu.add_command(label="Copy", command=lambda: copy_value(pass_var.get(), root))
+            menu.add_command(label="Empty", command=lambda: pass_var.set(""))
+            menu.tk_popup(e.x_root, e.y_root)
+        
+        pass_entry.bind("<Button-3>", pass_context_menu)
+        pass_entry.bind("<Control-c>", lambda e: copy_value(pass_var.get(), root))
+
     tk.Frame(scrollable_details_frame, height=1, bg="#cccccc").pack(fill='x', padx=20, pady=(0, 10))
     pass_entry.bind("<FocusIn>", lambda e: highlight_row(pass_row, [pass_entry]))
     pass_entry.bind("<FocusOut>", lambda e: reset_row(pass_row, [pass_entry]))
@@ -3852,7 +4008,7 @@ def show_password_details(root, password_id=None):
 	
     # --- Password Strength Indicator ---
     strength_row = tk.Frame(scrollable_details_frame, bg=normal_color)
-    strength_row.pack(fill='x', padx=20, pady=5)
+    strength_row.pack(fill='x', padx=25, pady=5)
 
     strength_label = tk.Label(strength_row, text="Strength: ", anchor="w", bg=normal_color)
     strength_label.pack(side='left', fill='x', expand=True)
@@ -3870,12 +4026,37 @@ def show_password_details(root, password_id=None):
     url_lframe = tk.Frame(url_row, bg=normal_color)
     url_lframe.pack(anchor='w')
     ttk.Label(url_lframe, text="URL:", style="Normal.TLabel").pack(side='left')
-    url_entry = tk.Entry(url_row, fg="#000000", bg=normal_color, relief="flat")
+    
+    url_frame = tk.Frame(url_row, bg=normal_color)
+    url_frame.pack(fill='x')
+    url_entry = tk.Entry(url_frame, fg="#000000", bg=normal_color, relief="flat")
     url_entry.insert(0, row[4] if row[4] else "")
-    url_entry.pack(fill='x')
+    url_entry.pack(side='left', fill='x', expand=True)
+    
+    # Add copy button for URL field
+    if is_edit_mode:
+        try:
+            copy_icon = tk.PhotoImage(file="Images/copy_b.png").subsample(3, 3)
+            url_copy_btn = tk.Button(url_frame, image=copy_icon, bg=normal_color, bd=0)
+            url_copy_btn.pack(side='left', padx=5)
+            url_copy_btn.bind("<Button-1>", lambda e: copy_value(url_entry.get(), root))
+            url_copy_btn.bind("<Enter>", lambda e: show_tooltip(e.widget, "Copy URL"))
+            url_copy_btn.bind("<Leave>", lambda e: hide_tooltip())
+            url_copy_btn.image = copy_icon
+        except:
+            pass
+        
+        # Add context menu for URL field
+        def url_context_menu(e):
+            menu = tk.Menu(root, tearoff=0)
+            menu.add_command(label="Copy", command=lambda: copy_value(url_entry.get(), root))
+            menu.add_command(label="Empty", command=lambda: url_entry.delete(0, tk.END))
+            menu.tk_popup(e.x_root, e.y_root)
+        
+        url_entry.bind("<Button-3>", url_context_menu)
+        url_entry.bind("<Control-c>", lambda e: copy_value(url_entry.get(), root))
+    
     tk.Frame(scrollable_details_frame, height=1, bg="#cccccc").pack(fill='x', padx=20, pady=(0, 10))
-    url_entry.bind("<FocusIn>", lambda e: highlight_row(url_row, [url_entry]))
-    url_entry.bind("<FocusOut>", lambda e: reset_row(url_row, [url_entry]))
 
     # --- Notes Row ---
     notes_row = tk.Frame(scrollable_details_frame, bg=normal_color)
@@ -3883,12 +4064,37 @@ def show_password_details(root, password_id=None):
     notes_lframe = tk.Frame(notes_row, bg=normal_color)
     notes_lframe.pack(anchor='w')
     ttk.Label(notes_lframe, text="Notes:", style="Normal.TLabel").pack(side='left')
-    notes_text = tk.Text(notes_row, height=4, width=22, fg="#000000", bg=normal_color, relief="flat")
+    
+    notes_frame = tk.Frame(notes_row, bg=normal_color)
+    notes_frame.pack(fill='x')
+    notes_text = tk.Text(notes_frame, height=4, width=22, fg="#000000", bg=normal_color, relief="flat")
     notes_text.insert("1.0", row[5] if row[5] else "")
-    notes_text.pack(fill='x')
+    notes_text.pack(side='left', fill='x', expand=True)
+    
+    # Add copy button for notes field
+    if is_edit_mode:
+        try:
+            copy_icon = tk.PhotoImage(file="Images/copy_b.png").subsample(3, 3)
+            notes_copy_btn = tk.Button(notes_frame, image=copy_icon, bg=normal_color, bd=0)
+            notes_copy_btn.pack(side='left', padx=5)
+            notes_copy_btn.bind("<Button-1>", lambda e: copy_value(notes_text.get("1.0", "end-1c"), root))
+            notes_copy_btn.bind("<Enter>", lambda e: show_tooltip(e.widget, "Copy notes"))
+            notes_copy_btn.bind("<Leave>", lambda e: hide_tooltip())
+            notes_copy_btn.image = copy_icon
+        except:
+            pass
+        
+        # Add context menu for notes field
+        def notes_context_menu(e):
+            menu = tk.Menu(root, tearoff=0)
+            menu.add_command(label="Copy", command=lambda: copy_value(notes_text.get("1.0", "end-1c"), root))
+            menu.add_command(label="Empty", command=lambda: notes_text.delete("1.0", tk.END))
+            menu.tk_popup(e.x_root, e.y_root)
+        
+        notes_text.bind("<Button-3>", notes_context_menu)
+        notes_text.bind("<Control-c>", lambda e: copy_value(notes_text.get("1.0", "end-1c"), root))
+    
     tk.Frame(scrollable_details_frame, height=1, bg="#cccccc").pack(fill='x', padx=20, pady=(0, 10))
-    notes_text.bind("<FocusIn>", lambda e: highlight_row(notes_row, [notes_text]))
-    notes_text.bind("<FocusOut>", lambda e: reset_row(notes_row, [notes_text]))
 
     # --- Master Password Reprompt Row ---
     mp_row = tk.Frame(scrollable_details_frame, bg=normal_color)
@@ -4112,7 +4318,7 @@ def show_password_details(root, password_id=None):
     # Initial password strength update
     update_password_strength(ui_context)
 
-def open_add_password_form():
+def open_add_password_form(root):
     show_password_details(root)  # Call without password_id to enter add mode
 
 def save_and_reset_flag(password_id, *args, root=None):
@@ -4748,21 +4954,14 @@ def get_label_color(label):
     }
     return colors.get(label, "#95a5a6")  # Default color if label not found
 
-def show_password_health_content():
-    global add_button_ref
-
+def show_password_health_content(root):
     toggle_scrollbar(True)
-    toggle_scrolling(True)
+    toggle_scrolling(True, root)
 
     # Function to display password health content
     for widget in main_frame.winfo_children():
         if widget != timer_label:  # Do not destroy the timer label
             widget.destroy()
-
-    # Destroy the existing "Add" button if it exists
-    if add_button_ref:
-        add_button_ref.destroy()  # Destroy the old button
-        add_button_ref = None     # Reset the global reference
 
     # Create a container frame that will center its contents
     container = tk.Frame(main_frame, bg="#f0f0f0")
@@ -4811,7 +5010,7 @@ def show_password_health_content():
         # Back arrow to return to main menu
         back_arrow = tk.Label(main_frame, text="←", font=("Helvetica", 14), cursor="hand2", bg="white")
         back_arrow.pack(anchor="w", padx=10, pady=10)
-        back_arrow.bind("<Button-1>", lambda e: show_password_health_content())
+        back_arrow.bind("<Button-1>", lambda e: show_password_health_content(root))
 
         # Display password entries
         for entry in entries:
@@ -4830,15 +5029,13 @@ def show_password_health_content():
             platform_user = tk.Label(entry_frame, text=f"Username: {entry[3]}", bg="white", anchor="w")
             platform_user.grid(row=2, column=0, padx=10, pady=5, sticky="w")
 
-            masked_password = tk.Label(entry_frame, text="Password: **********", bg="white", anchor="w")
-            masked_password.grid(row=3, column=0, padx=10, pady=5, sticky="w")
-
             # Buttons container to align them vertically
             buttons_frame = tk.Frame(entry_frame, bg="white")
             buttons_frame.grid(row=0, column=1, rowspan=4, padx=10, pady=5, sticky="ns")
 
             # Change Password button
-            change_button = tk.Button(buttons_frame, text="Change Password", command=lambda e=entry: edit_selected_entry_by_id(e[0]))
+            change_button = tk.Button(buttons_frame, text="Change Password", 
+                                    command=lambda e=entry: change_password_from_health(e[0], root))
             change_button.pack(pady=5, fill="x")
 
             # Delete button
@@ -4892,6 +5089,14 @@ def show_password_health_content():
             count_label.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
             label.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
             arrow.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
+
+    # Switch to home content and show password details
+    def change_password_from_health(password_id, root):
+        # First show the home content
+        show_home_content(root)
+        
+        # Then show the password details for the selected ID
+        root.after(100, lambda: show_password_details(root, password_id))
 
 def edit_selected_entry_by_id(password_id):
     conn = sqlite3.connect(DB_FILE)
@@ -5151,7 +5356,7 @@ def edit_selected_entry_by_id(password_id):
             conn.close()
             messagebox.showinfo("Success", "Password updated successfully!")
             edit_password_window.destroy()
-            show_password_health_content()  # Or load_passwords() depending on context
+            show_password_health_content(root)  # Or load_passwords() depending on context
         else:
             messagebox.showwarning("Input Error", "Please fill in all fields.")
             
@@ -5197,21 +5402,14 @@ def delete_selected_entry_by_id(password_id):
 #     conn.commit()
 #     conn.close()
 
-def show_settings_content():
-    global add_button_ref
-
+def show_settings_content(root):
     toggle_scrollbar(True)
-    toggle_scrolling(True)
+    toggle_scrolling(True, root)
 
     # Function to display settings content
     for widget in main_frame.winfo_children():
         if widget != timer_label:  # Do not destroy the timer label
             widget.destroy()
-    
-    # Destroy the existing "Add" button if it exists
-    if add_button_ref:
-        add_button_ref.destroy()  # Destroy the old button
-        add_button_ref = None     # Reset the global reference
 
     # Add a placeholder to maintain height
     placeholder = tk.Frame(nav_bar, width=30, height=30, bg="#333333")
@@ -5219,13 +5417,19 @@ def show_settings_content():
 
     # Create a container frame that will center its contents
     container = tk.Frame(main_frame, bg="#f0f0f0")
-    container.pack(fill=tk.BOTH, expand=True)
+    container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
     # Create the sidebar and content area within the container
-    sidebar = tk.Frame(container, width=200, bg="#f0f0f0")
-    sidebar.pack(side=tk.LEFT, fill=tk.Y)
+    sidebar = tk.Frame(container, width=220, bg="#f8f9fa", bd=1, relief="solid")
+    sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
-    content_area = tk.Frame(container, bg="white")
+    # Add sidebar header
+    sidebar_header = tk.Frame(sidebar, bg="#e9ecef", height=40)
+    sidebar_header.pack(fill=tk.X, pady=(0, 10))
+    tk.Label(sidebar_header, text="SETTINGS", font=("Helvetica", 12, "bold"), 
+            bg="#e9ecef", fg="#495057").pack(pady=10)
+
+    content_area = tk.Frame(container, bg="white", bd=1, relief="solid")
     content_area.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
     # Display initial message - centered in the content area
@@ -5236,10 +5440,72 @@ def show_settings_content():
              text="Here is the settings page. Click any option from the left sidebar to configure individual settings.", 
              font=("Helvetica", 14), 
              wraplength=400, 
-             justify="center").pack(pady=20, expand=True)
+             justify="center", fg="#495057").pack(pady=20, expand=True)
 
-    # Sidebar options
-    options = ["MFA", "Alerts", "Recovery Keys", "Backup & Restore", "Autologout", "Clipboard Timer"]
+    # Sidebar options with icons (using text icons for simplicity)
+    options = [
+        {"name": "MFA", "icon": "🔒"},
+        {"name": "Alerts", "icon": "🔔"},
+        {"name": "Recovery Keys", "icon": "🔑"},
+        {"name": "Backup & Restore", "icon": "💾"},
+        {"name": "Autologout", "icon": "⏱️"},
+        {"name": "Clipboard Timer", "icon": "📋"}
+    ]
+
+    # Global to track active button
+    global active_settings_button
+    active_settings_button = None
+    
+    # Function to handle button clicks
+    def on_button_click(button, option_name):
+        global active_settings_button
+        
+        # Reset previous active button
+        if active_settings_button:
+            active_settings_button.config(bg="#f8f9fa", fg="#495057", relief="flat")
+        
+        # Set new active button
+        button.config(bg="#e2e6ea", fg="#0d6efd", relief="sunken")
+        active_settings_button = button
+        
+        # Execute the corresponding function
+        if option_name == "MFA":
+            show_mfa_settings()
+        elif option_name == "Alerts":
+            show_alerts_settings()
+        elif option_name == "Recovery Keys":
+            show_recovery_keys_settings()
+        elif option_name == "Backup & Restore":
+            show_backup_settings()
+        elif option_name == "Autologout":
+            show_autologout_settings()
+        elif option_name == "Clipboard Timer":
+            show_clipboard_timer_settings()
+
+    # Create sidebar buttons
+    for option in options:
+        btn_frame = tk.Frame(sidebar, bg="#f8f9fa")
+        btn_frame.pack(fill=tk.X, padx=5, pady=2)
+        
+        button = tk.Button(btn_frame, 
+                          text=f"  {option['icon']}  {option['name']}", 
+                          anchor="w", 
+                          font=("Helvetica", 11),
+                          bg="#f8f9fa",
+                          fg="#495057",
+                          bd=0,
+                          relief="flat",
+                          padx=15,
+                          pady=10)
+        button.pack(fill=tk.X)
+        
+        # Bind hover effects
+        button.bind("<Enter>", lambda e, b=button: b.config(bg="#e9ecef"))
+        button.bind("<Leave>", lambda e, b=button: 
+                   b.config(bg="#f8f9fa") if b != active_settings_button else None)
+        
+        # Bind click event
+        button.config(command=lambda b=button, opt=option['name']: on_button_click(b, opt))
 
     # Flag to track if the master password has been entered
     global password_verified
@@ -5273,13 +5539,23 @@ def show_settings_content():
         for widget in content_area.winfo_children():
             widget.destroy()
         
-        # Create a frame to center the content
         center_frame = tk.Frame(content_area, bg="white")
-        center_frame.pack(fill=tk.BOTH, expand=True)
+        center_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        tk.Label(center_frame, text="MFA Settings", font=("Helvetica", 16)).pack(pady=10)
+        tk.Label(center_frame, text="MFA Settings", font=("Helvetica", 16, "bold"), bg="white").pack(pady=10)
+        
+        # Settings container
+        settings_frame = tk.LabelFrame(center_frame, text="Multi-Factor Authentication", 
+                                     bg="white", font=("Helvetica", 12, "bold"), padx=10, pady=10)
+        settings_frame.pack(fill=tk.X, pady=10)
+        
         mfa_var = tk.BooleanVar(value=settings[0])
-        tk.Checkbutton(center_frame, text="Enable MFA", variable=mfa_var).pack(pady=5)
+        tk.Checkbutton(settings_frame, text="Enable MFA", variable=mfa_var, 
+                      bg="white", font=("Helvetica", 11)).pack(anchor="w", pady=5)
+        
+        # Save button container
+        btn_frame = tk.Frame(center_frame, bg="white")
+        btn_frame.pack(pady=10)
         
         def show_qr_and_otp():
             otp_secret = pyotp.random_base32()
@@ -5292,19 +5568,19 @@ def show_settings_content():
             qr_code_img = ImageTk.PhotoImage(qr_code)
             
             # Place the setup key before the QR code
-            tk.Label(center_frame, text=f"Setup Key: {otp_secret}", font=("Helvetica", 12)).pack(pady=5)
-            qr_label = tk.Label(center_frame, image=qr_code_img)
+            tk.Label(settings_frame, text=f"Setup Key: {otp_secret}", font=("Helvetica", 12)).pack(pady=5)
+            qr_label = tk.Label(settings_frame, image=qr_code_img)
             qr_label.image = qr_code_img
             qr_label.pack(pady=10)
             
             # Instructions for the user
-            tk.Label(center_frame, text="Use an authenticator app (e.g., Google Authenticator, Microsoft Authenticator) on your phone to scan the QR code or manually enter the setup key.", 
-                    font=("Helvetica", 12)).pack(pady=5)
+            tk.Label(settings_frame, text="Use an authenticator app to scan the QR code or enter the setup key.", 
+                    font=("Helvetica", 11), wraplength=500, justify="left").pack(pady=5)
             
             # OTP entry field
-            tk.Label(center_frame, text="Enter the OTP code from your authenticator app:", 
-                    font=("Helvetica", 12)).pack(pady=10)
-            otp_entry = tk.Entry(center_frame, font=("Helvetica", 14), justify="center")
+            tk.Label(settings_frame, text="Enter the OTP code from your authenticator app:", 
+                    font=("Helvetica", 11)).pack(pady=10)
+            otp_entry = tk.Entry(settings_frame, font=("Helvetica", 14), justify="center")
             otp_entry.pack(pady=10)
             otp_entry.focus_set()  # Set focus to the entry field
 
@@ -5319,7 +5595,8 @@ def show_settings_content():
                 else:
                     messagebox.showerror("Error", "OTP verification failed. MFA settings not saved.")
 
-            verify_button = tk.Button(center_frame, text="Verify and Save", command=verify_and_save)
+            verify_button = tk.Button(settings_frame, text="Verify and Save", 
+                                    font=("Helvetica", 11), command=verify_and_save)
             verify_button.pack(pady=10)
             
             # Bind the Enter key to the verify_and_save function
@@ -5337,35 +5614,43 @@ def show_settings_content():
                     if not require_master_password():
                         return
                     password_verified = True  # Set the flag after verifying the password
-                save_button.pack_forget()  # Hide the Save button
+                save_btn.pack_forget()  # Hide the Save button
                 show_qr_and_otp()
             else:  # Disabling MFA
                 save_settings('mfa', 0, show_mfa_settings)
                 save_settings('otp_secret', '', show_mfa_settings)  # Clear OTP secret
                 messagebox.showinfo("Success", "MFA settings disabled.")
 
-
-        save_button = tk.Button(center_frame, text="Save", command=save_mfa_setting)
-        save_button.pack(pady=10)
-
-        #def cancel_operation():
-        #    save_settings('mfa', False, show_mfa_settings)
-
-        # Bind the cancel operation to window close event
-        #content_area.bind("<Destroy>", lambda event: cancel_operation())
+        save_btn = tk.Button(btn_frame, text="Save Settings", font=("Helvetica", 11, "bold"), 
+                            bg="#4CAF50", fg="white", padx=10, pady=5, command=save_mfa_setting)
+        save_btn.pack()
 
     def show_alerts_settings():
         for widget in content_area.winfo_children():
             widget.destroy()
         
         center_frame = tk.Frame(content_area, bg="white")
-        center_frame.pack(fill=tk.BOTH, expand=True)
+        center_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        tk.Label(center_frame, text="Alerts Settings", font=("Helvetica", 16)).pack(pady=10)
+        tk.Label(center_frame, text="Alerts Settings", font=("Helvetica", 16, "bold"), bg="white").pack(pady=10)
+        
+        # Settings container
+        settings_frame = tk.LabelFrame(center_frame, text="Security Alerts", 
+                                     bg="white", font=("Helvetica", 12, "bold"), padx=10, pady=10)
+        settings_frame.pack(fill=tk.X, pady=10)
+        
         alerts_var = tk.BooleanVar(value=settings[1])
-        tk.Checkbutton(center_frame, text="Enable Alerts", variable=alerts_var).pack(pady=5)
-        tk.Button(center_frame, text="Save", 
-                 command=lambda: save_settings('alerts', alerts_var.get(), show_alerts_settings)).pack(pady=10)
+        tk.Checkbutton(settings_frame, text="Enable Security Alerts", variable=alerts_var, 
+                      bg="white", font=("Helvetica", 11)).pack(anchor="w", pady=5)
+        
+        # Save button
+        btn_frame = tk.Frame(center_frame, bg="white")
+        btn_frame.pack(pady=10)
+        
+        save_btn = tk.Button(btn_frame, text="Save Settings", font=("Helvetica", 11, "bold"), 
+                            bg="#4CAF50", fg="white", padx=10, pady=5,
+                            command=lambda: save_settings('alerts', alerts_var.get(), show_alerts_settings))
+        save_btn.pack()
 
     def generate_recovery_keys():
         """Generate 10 recovery keys and store their hashes in the database."""
@@ -5394,15 +5679,22 @@ def show_settings_content():
             widget.destroy()
 
         all_keys = ', '.join(new_keys)
+        key_grid = tk.Frame(keys_frame, bg="white")
+        key_grid.pack(fill=tk.BOTH, expand=True)
+        
+        # Display keys in a grid format
         for i in range(0, len(new_keys), 2):
-            key_frame = tk.Frame(keys_frame)
-            key_frame.pack(pady=2)
-            tk.Label(key_frame, text=new_keys[i]).pack(side=tk.LEFT, padx=5)
+            row_frame = tk.Frame(key_grid, bg="white")
+            row_frame.pack(fill=tk.X, pady=2)
+            tk.Label(row_frame, text=new_keys[i], font=("Helvetica", 11), 
+                    bg="white", width=12, anchor="w").pack(side=tk.LEFT, padx=10)
             if i + 1 < len(new_keys):
-                tk.Label(key_frame, text=new_keys[i + 1]).pack(side=tk.LEFT, padx=5)
+                tk.Label(row_frame, text=new_keys[i + 1], font=("Helvetica", 11), 
+                        bg="white", width=12, anchor="w").pack(side=tk.LEFT, padx=10)
 
         # Add a button to copy all keys
-        copy_all_button = tk.Button(keys_frame, text="Copy All", command=lambda: copy_value(all_keys))
+        copy_all_button = tk.Button(key_grid, text="Copy All Keys", font=("Helvetica", 11),
+                                   command=lambda: copy_value(all_keys, root))
         copy_all_button.pack(pady=10)
 
         messagebox.showinfo("Recovery Keys Generated", "New recovery keys have been successfully generated.")
@@ -5410,18 +5702,29 @@ def show_settings_content():
     def show_recovery_keys_settings():
         for widget in content_area.winfo_children():
             widget.destroy()
-            
-        center_frame = tk.Frame(content_area, bg="white")
-        center_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Add a button to generate new recovery keys
-        tk.Label(center_frame, text="Recovery Keys Settings", font=("Helvetica", 16)).pack(pady=10)
-        tk.Button(center_frame, text="Generate New Recovery Keys", command=generate_recovery_keys).pack(pady=10)
+        center_frame = tk.Frame(content_area, bg="white")
+        center_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        tk.Label(center_frame, text="Recovery Keys", font=("Helvetica", 16, "bold"), bg="white").pack(pady=10)
+        
+        # Key management frame
+        key_frame = tk.LabelFrame(center_frame, text="Key Management", 
+                                bg="white", font=("Helvetica", 12, "bold"), padx=10, pady=10)
+        key_frame.pack(fill=tk.X, pady=10)
+        
+        tk.Button(key_frame, text="Generate New Recovery Keys", font=("Helvetica", 11), 
+                 command=generate_recovery_keys).pack(pady=10)
+        
+        # Display area
+        display_frame = tk.LabelFrame(center_frame, text="Current Keys", 
+                                    bg="white", font=("Helvetica", 12, "bold"), padx=10, pady=10)
+        display_frame.pack(fill=tk.X, pady=10)
         
         global keys_frame
-        keys_frame = tk.Frame(center_frame, bd=2, relief=tk.SUNKEN, padx=10, pady=10)
-        keys_frame.pack(pady=10)
-        
+        keys_frame = tk.Frame(display_frame, bg="white")
+        keys_frame.pack(fill=tk.BOTH, expand=True)
+
     def show_backup_settings(): 
         for widget in content_area.winfo_children():
             widget.destroy()
@@ -5444,27 +5747,31 @@ def show_settings_content():
         path_frame.pack(fill=tk.X, pady=5)
         
         backup_path_var = tk.StringVar(value=settings[6])
-        entry = tk.Entry(path_frame, textvariable=backup_path_var, width=50)
-        entry.pack(side=tk.LEFT, padx=(0, 5))
+        entry = tk.Entry(path_frame, textvariable=backup_path_var, font=("Helvetica", 11), width=40)
+        entry.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
         
-        tk.Button(path_frame, text="Browse...", command=lambda: browse_backup_dir(backup_path_var)).pack(side=tk.LEFT)
+        tk.Button(path_frame, text="Browse...", font=("Helvetica", 11),
+                 command=lambda: browse_backup_dir(backup_path_var)).pack(side=tk.LEFT)
 
         # Save Button
-        tk.Button(center_frame, text="Save Settings", font=("Helvetica", 11, "bold"), bg="#4CAF50", fg="white", padx=10, pady=5,
+        btn_frame = tk.Frame(center_frame, bg="white")
+        btn_frame.pack(pady=10)
+        
+        tk.Button(btn_frame, text="Save Settings", font=("Helvetica", 11, "bold"), bg="#4CAF50", fg="white", padx=10, pady=5,
                 command=lambda: (
                     save_settings("backup", int(backup_var.get()), show_backup_settings),
                     save_settings("backup_path", backup_path_var.get(), show_backup_settings)
-                )).pack(pady=(10, 20))
+                )).pack()
 
         # Manual Backup
         manual_frame = tk.LabelFrame(center_frame, text="Manual Operations", bg="white", font=("Helvetica", 12, "bold"), padx=10, pady=10)
-        manual_frame.pack(fill=tk.X)
+        manual_frame.pack(fill=tk.X, pady=10)
 
         tk.Label(manual_frame, text="Manual Backup:", font=("Helvetica", 11), bg="white").pack(anchor="w", pady=(0, 5))
-        tk.Button(manual_frame, text="Backup Now", font=("Helvetica", 10), command=manual_backup).pack(anchor="w", pady=5)
+        tk.Button(manual_frame, text="Backup Now", font=("Helvetica", 11), command=manual_backup).pack(anchor="w", pady=5)
 
         tk.Label(manual_frame, text="Manual Restore:", font=("Helvetica", 11), bg="white").pack(anchor="w", pady=(10, 5))
-        tk.Button(manual_frame, text="Restore Now", font=("Helvetica", 10), command=manual_restore).pack(anchor="w", pady=5)
+        tk.Button(manual_frame, text="Restore Now", font=("Helvetica", 11), command=manual_restore).pack(anchor="w", pady=5)
 
     def browse_backup_dir(path_var):
         directory = filedialog.askdirectory()
@@ -5512,50 +5819,74 @@ def show_settings_content():
             widget.destroy()
             
         center_frame = tk.Frame(content_area, bg="white")
-        center_frame.pack(fill=tk.BOTH, expand=True)
+        center_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        tk.Label(center_frame, text="Autologout Settings", font=("Helvetica", 16)).pack(pady=10)
-        tk.Label(center_frame, text="Automatically lock the workspace after a period of inactivity (in seconds):", 
-                font=("Helvetica", 12)).pack(pady=5)
-
-        frame = tk.Frame(center_frame)
-        frame.pack(pady=5)
+        tk.Label(center_frame, text="Auto-Logout Settings", font=("Helvetica", 16, "bold"), bg="white").pack(pady=10)
+        
+        # Settings container
+        settings_frame = tk.LabelFrame(center_frame, text="Inactivity Timeout", 
+                                     bg="white", font=("Helvetica", 12, "bold"), padx=10, pady=10)
+        settings_frame.pack(fill=tk.X, pady=10)
+        
+        tk.Label(settings_frame, text="Lock workspace after inactivity (seconds):", 
+                font=("Helvetica", 11), bg="white").pack(anchor="w", pady=5)
+        
+        input_frame = tk.Frame(settings_frame, bg="white")
+        input_frame.pack(fill=tk.X, pady=5)
+        
         autologout_var = tk.IntVar(value=settings[3])
         validate_cmd = center_frame.register(validate_integer)
-        tk.Spinbox(frame, from_=0, to=float('inf'), textvariable=autologout_var, width=5, 
-                  validate='key', validatecommand=(validate_cmd, '%P')).pack(side=tk.LEFT)
-        tk.Label(frame, text="seconds", font=("Helvetica", 12)).pack(side=tk.LEFT)
-
-        def save_autologout():
-            total_seconds = autologout_var.get()
-            save_settings('autologout', total_seconds, show_autologout_settings)
-
-        tk.Button(center_frame, text="Save", command=save_autologout).pack(pady=10)
+        spinbox = tk.Spinbox(input_frame, from_=0, to=3600, textvariable=autologout_var, 
+                            width=5, font=("Helvetica", 11), 
+                            validate='key', validatecommand=(validate_cmd, '%P'))
+        spinbox.pack(side=tk.LEFT)
+        tk.Label(input_frame, text="seconds", font=("Helvetica", 11), bg="white").pack(side=tk.LEFT, padx=5)
+        
+        # Save button
+        btn_frame = tk.Frame(center_frame, bg="white")
+        btn_frame.pack(pady=10)
+        
+        save_btn = tk.Button(btn_frame, text="Save Settings", font=("Helvetica", 11, "bold"), 
+                            bg="#4CAF50", fg="white", padx=10, pady=5,
+                            command=lambda: save_settings('autologout', autologout_var.get(), show_autologout_settings))
+        save_btn.pack()
 
     def show_clipboard_timer_settings():
         for widget in content_area.winfo_children():
             widget.destroy()
             
         center_frame = tk.Frame(content_area, bg="white")
-        center_frame.pack(fill=tk.BOTH, expand=True)
+        center_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        tk.Label(center_frame, text="Clipboard Timer Settings", font=("Helvetica", 16)).pack(pady=10)
-        tk.Label(center_frame, text="Automatically clear the clipboard after copying an item (in seconds):", 
-                font=("Helvetica", 12)).pack(pady=5)
-
-        frame = tk.Frame(center_frame)
-        frame.pack(pady=5)
+        tk.Label(center_frame, text="Clipboard Settings", font=("Helvetica", 16, "bold"), bg="white").pack(pady=10)
+        
+        # Settings container
+        settings_frame = tk.LabelFrame(center_frame, text="Clipboard Clear Timer", 
+                                     bg="white", font=("Helvetica", 12, "bold"), padx=10, pady=10)
+        settings_frame.pack(fill=tk.X, pady=10)
+        
+        tk.Label(settings_frame, text="Clear clipboard after (seconds):", 
+                font=("Helvetica", 11), bg="white").pack(anchor="w", pady=5)
+        
+        input_frame = tk.Frame(settings_frame, bg="white")
+        input_frame.pack(fill=tk.X, pady=5)
+        
         seconds_var = tk.IntVar(value=settings[4])
         validate_cmd = center_frame.register(validate_integer)
-        tk.Spinbox(frame, from_=0, to=float('inf'), textvariable=seconds_var, width=5, 
-                  validate='key', validatecommand=(validate_cmd, '%P')).pack(side=tk.LEFT)
-        tk.Label(frame, text="seconds", font=("Helvetica", 12)).pack(side=tk.LEFT)
-
-        def save_clipboard_timer():
-            total_seconds = seconds_var.get()
-            save_settings('clipboard_timer', total_seconds, show_clipboard_timer_settings)
-
-        tk.Button(center_frame, text="Save", command=save_clipboard_timer).pack(pady=10)
+        spinbox = tk.Spinbox(input_frame, from_=0, to=3600, textvariable=seconds_var, 
+                            width=5, font=("Helvetica", 11), 
+                            validate='key', validatecommand=(validate_cmd, '%P'))
+        spinbox.pack(side=tk.LEFT)
+        tk.Label(input_frame, text="seconds", font=("Helvetica", 11), bg="white").pack(side=tk.LEFT, padx=5)
+        
+        # Save button
+        btn_frame = tk.Frame(center_frame, bg="white")
+        btn_frame.pack(pady=10)
+        
+        save_btn = tk.Button(btn_frame, text="Save Settings", font=("Helvetica", 11, "bold"), 
+                            bg="#4CAF50", fg="white", padx=10, pady=5,
+                            command=lambda: save_settings('clipboard_timer', seconds_var.get(), show_clipboard_timer_settings))
+        save_btn.pack()
 
     # Load current settings
     global settings
@@ -5565,18 +5896,24 @@ def show_settings_content():
     for option in options:
         load_settings()
         if option == "MFA":
-            button = tk.Button(sidebar, text=option, anchor="w", command=show_mfa_settings)
+            button = tk.Button(sidebar, text=option, anchor="w", font=("Helvetica", 11),
+                             command=show_mfa_settings)
         elif option == "Alerts":
-            button = tk.Button(sidebar, text=option, anchor="w", command=show_alerts_settings)
+            button = tk.Button(sidebar, text=option, anchor="w", font=("Helvetica", 11),
+                             command=show_alerts_settings)
         elif option == "Recovery Keys":
-            button = tk.Button(sidebar, text=option, anchor="w", command=show_recovery_keys_settings)
+            button = tk.Button(sidebar, text=option, anchor="w", font=("Helvetica", 11),
+                             command=show_recovery_keys_settings)
         elif option == "Backup & Restore":
-            button = tk.Button(sidebar, text=option, anchor="w", command=show_backup_settings)
+            button = tk.Button(sidebar, text=option, anchor="w", font=("Helvetica", 11),
+                             command=show_backup_settings)
         elif option == "Autologout":
-            button = tk.Button(sidebar, text=option, anchor="w", command=show_autologout_settings)
+            button = tk.Button(sidebar, text=option, anchor="w", font=("Helvetica", 11),
+                             command=show_autologout_settings)
         elif option == "Clipboard Timer":
-            button = tk.Button(sidebar, text=option, anchor="w", command=show_clipboard_timer_settings)
-        button.pack(fill=tk.X, pady=2)
+            button = tk.Button(sidebar, text=option, anchor="w", font=("Helvetica", 11),
+                             command=show_clipboard_timer_settings)
+        button.pack(fill=tk.X, pady=5, padx=5)
 
 def automatic_backup():
     conn = sqlite3.connect(DB_FILE)
@@ -5733,7 +6070,7 @@ def toggle_scrollbar(show):
     canvas.configure(yscrollcommand=scrollbar.set if show else None)
 
 # Function to toggle scrolling
-def toggle_scrolling(enable):
+def toggle_scrolling(enable, root):
     global scroll_enabled
     scroll_enabled = enable
     
@@ -5778,7 +6115,7 @@ def main():
 
     if not master_password_set:
         # First-time setup
-        master_password = ask_initial_master_password()
+        master_password = ask_initial_master_password(root)
         if master_password is None:
             return  # Exit if user cancels
 
@@ -5790,6 +6127,7 @@ def main():
     else:
         #Login
         def show_login_screen():
+            global login_root
             login_root = tk.Tk()
             login_root.title("Login - Password Manager")
             login_root.geometry("550x300")
@@ -5938,8 +6276,11 @@ def main():
                             stored_hashed_password = base64.b64decode(result[0])
                             key = stored_hashed_password[16:]
                             master_password = recovery_key
+                            login_root.withdraw()
+                            check_mfa_and_show_main_window()
+                            return
                         else:
-                            messagebox.showerror("Error", "No master password found! Please enter a valid recovery key.")
+                            messagebox.showerror("Error", "No recovery key found! Please enter a valid recovery key.")
                             login_root.destroy()
                             show_login_screen()
                             return
@@ -5971,7 +6312,7 @@ def main():
                     messagebox.showerror("Invalid Choice", "Please select a valid option.")
                     return
 
-                login_root.destroy()
+                login_root.withdraw()
                 check_mfa_and_show_main_window()
 
             def create_login_elements():
@@ -6030,12 +6371,12 @@ def main():
             def on_enter(event):
                 on_login()
 
-            def on_closing():
+            def on_closing_login():
                 login_root.destroy()
                 exit()
 
             login_root.bind('<Return>', on_enter)
-            login_root.protocol("WM_DELETE_WINDOW", on_closing)
+            login_root.protocol("WM_DELETE_WINDOW", on_closing_login)
 
             login_root.after(100, login_root.focus_force)
             login_root.after(200, lambda: master_password_entry.focus())
@@ -6048,27 +6389,18 @@ def main():
                 encrypted_otp_secret = settings[5]
                 if verify_otp(encrypted_otp_secret):
                     show_main_window()
+                    login_root.destroy()  # Close login window if MFA is successful
                 else:
                     show_login_screen()
             else:
                 show_main_window()
 
         def show_main_window():
-            global root, canvas, scrollbar, scroll_enabled, item_context_menu
-            root = tk.Tk()
-            root.protocol("WM_DELETE_WINDOW", on_closing)
+            global canvas, scrollbar, scroll_enabled, item_context_menu
+            root = tk.Toplevel()
+            root.protocol("WM_DELETE_WINDOW", lambda: on_closing(root))
             root.title("Password Manager")
-
-            # Window size
-            width, height = 700, 550
-            screen_width = root.winfo_screenwidth()
-            screen_height = root.winfo_screenheight()
-
-            # Calculate position to center window
-            x = (screen_width - width) // 2
-            y = (screen_height - height) // 2
-
-            root.geometry(f"{width}x{height}+{x}+{y}")
+            root.minsize(700, 550) 
             root.configure(bg="#f0f0f0") # Light background color
 
             # Set window icon
@@ -6094,11 +6426,11 @@ def main():
 
             password_health_label = tk.Label(nav_bar, text="Password Health", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
             password_health_label.pack(side=tk.LEFT, padx=10)
-            password_health_label.bind("<Button-1>", lambda e: show_password_health_content())
+            password_health_label.bind("<Button-1>", lambda e: show_password_health_content(root))
 
             settings_label = tk.Label(nav_bar, text="Settings", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
             settings_label.pack(side=tk.LEFT, padx=10)
-            settings_label.bind("<Button-1>", lambda e: show_settings_content())
+            settings_label.bind("<Button-1>", lambda e: show_settings_content(root))
 
             # Create a main frame with scrollbar - packed in container, below nav_bar
             global main_frame
@@ -6135,20 +6467,32 @@ def main():
             bind_to_mousewheel(canvas)
             bind_to_mousewheel(main_frame)
 
-            # Create a timer label
+            # Create a footer frame for the timer label
+            footer_frame = tk.Frame(container, bg="#f0f0f0" , height=40)
+            footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+            # Create a timer label inside the footer frame
             global timer_label
-            timer_label = tk.Label(main_frame, text="", bg="#f0f0f0")
-            timer_label.pack()
+            timer_label = tk.Label(footer_frame, text="", bg="#f0f0f0", font=("Arial", 10))
+            timer_label.pack(side=tk.BOTTOM, padx=10, pady=5)
 
             # Reset the last activity time after successful login
             reset_timer()
 
             schedule_backups()
 
+            # Center window
+            root.update_idletasks()
+            width = root.winfo_width()
+            height = root.winfo_height()
+            x = (root.winfo_screenwidth() - width) // 2
+            y = (root.winfo_screenheight() - height) // 2
+            root.geometry(f"+{x}+{y}")
+
             show_home_content(root)
 
             # Start checking for inactivity
-            check_inactivity()
+            check_inactivity(root)
 
             # Start the main event loop
             root.mainloop()
