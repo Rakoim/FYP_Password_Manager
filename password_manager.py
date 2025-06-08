@@ -1,10 +1,11 @@
 from io import StringIO
+from pysqlitecipher import sqlitewrapper
+import sqlite3
 import signal
 import tkinter as tk 
 from tkinter import messagebox, simpledialog, filedialog, Menu
 from tkinter import ttk
 import math
-import sqlite3
 import hashlib
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
@@ -43,8 +44,6 @@ import multiprocessing as mp
 from functools import partial
 from collections import Counter
 import tracemalloc
-
-Testing 123
 
 # Constants
 DB_FILE = "passwords.db"
@@ -134,95 +133,6 @@ def initial_setup():
 
     return master_password
 
-def reset_timer(event=None):
-    global last_activity_time
-    last_activity_time = time.time()
-
-def check_inactivity(root):
-    global last_activity_time
-    current_time = time.time()
-    inactivity_period = current_time - last_activity_time
-
-    if inactivity_period > settings[3]:  # settings[3] is the autologout time in seconds
-        lock_system(root)
-
-    # Pass the function reference, not the function call
-    root.after(1000, lambda: check_inactivity(root))  # Check every second
-
-def lock_system(root):
-    # Destroy existing main window if it exists
-    if root:
-        root.destroy()
-        root = None
-
-    # Create a new root window for the lock screen
-    lock_window = tk.Tk()
-    lock_window.title("Session Locked")
-    lock_window.geometry("400x200")
-    lock_window.attributes('-topmost', True)  # Keep the window on top
-    lock_window.resizable(False, False)
-
-    # Center the window on the screen
-    lock_window.update_idletasks()
-    screen_width = lock_window.winfo_screenwidth()
-    screen_height = lock_window.winfo_screenheight()
-    x = (screen_width // 2) - (400 // 2)
-    y = (screen_height // 2) - (200 // 2)
-    lock_window.geometry(f"+{x}+{y}")
-
-    # Make the window modal and handle close button
-    lock_window.grab_set()
-    lock_window.protocol("WM_DELETE_WINDOW", lambda: unlock_session(lock_window))
-
-    # Message and unlock button
-    tk.Label(lock_window, text="Your session has been locked due to inactivity.", font=("Arial", 12)).pack(pady=40)
-    tk.Button(lock_window, text="Unlock", command=lambda: unlock_session(lock_window)).pack()
-
-    lock_window.mainloop()
-
-def unlock_session(lock_window):
-    # Close the lock screen and restart your application
-    lock_window.destroy()
-    main()  # Restart your main application
-
-def show_tooltip(widget, text):
-    global tooltip
-    hide_tooltip()
-    x = widget.winfo_rootx() + widget.winfo_width() + 10
-    y = widget.winfo_rooty() + 10
-
-    tooltip = tk.Toplevel(widget)
-    tooltip.wm_overrideredirect(True)
-    tooltip.wm_geometry(f"+{x}+{y}")
-    tooltip.configure(bg="#333333")
-
-    frame = tk.Frame(tooltip, bg="#333333", bd=0, highlightthickness=0)
-    frame.pack(padx=1, pady=1)
-
-    label = tk.Label(
-        frame,
-        text=text,
-        bg="#ffffff",
-        fg="#333333",
-        padx=10,
-        pady=6,
-        font=("Segoe UI", 10),
-        wraplength=200,
-        justify="left",
-        relief="flat",
-        bd=0
-    )
-    label.pack()
-
-    # Optional drop shadow effect
-    tooltip.lift()
-    tooltip.attributes("-topmost", True)
-
-def hide_tooltip():
-    global tooltip
-    if 'tooltip' in globals() and tooltip.winfo_exists():
-        tooltip.destroy()
-
 # Ask for the master password for the first time
 def ask_initial_master_password(root):
     while True:
@@ -281,39 +191,57 @@ def derive_key(master_password, salt):
     return kdf.derive(master_password.encode())
 
 def store_master_password(master_password):
-    """Hash and store the master password in the database."""
-    salt = os.urandom(16)  # Generate a 16-byte salt
-    key = derive_key(master_password, salt)  # Derive a key from the password
-    hashed_password = base64.b64encode(salt + key).decode()  # Store salt + key together
-
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-
-    cursor.execute("DELETE FROM master_password")  # Ensure only one master password exists
-    cursor.execute("INSERT INTO master_password (hashed_password) VALUES (?)", (hashed_password,))
-    conn.commit()
-    conn.close()
+    global sqlite_obj
+    
+    """Hash and store the master password using sqlitewrapper"""
+    # Generate salt and derive key
+    salt = os.urandom(16)
+    key = derive_key(master_password, salt)
+    
+    # Store salt + key together
+    hashed_password = base64.b64encode(salt + key).decode()
+    
+    # Delete any existing master passwords
+    # First get all IDs in the table
+    result = sqlite_obj.getDataFromTable("master_password", raiseConversionError=True, omitID=False)
+    
+    if result[1]:  # If there are rows in the table
+        # Delete each row by ID
+        for row in result[1]:  # result[1] contains the actual data
+            id_value = row[0]
+            sqlite_obj.deleteDataInTable("master_password", id_value, commit=False, updateId=True)
+    
+    # Insert the new master password
+    sqlite_obj.insertIntoTable("master_password", [hashed_password], commit=True)
 
 def verify_master_password(entered_password):
     """Verify if the entered master password is correct and return the key."""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT hashed_password FROM master_password")
-    stored_data = cursor.fetchone()
-    conn.close()
+    global sqlite_obj
 
-    if not stored_data:
-        return None  # No master password set
+    # Fetch the hashed password from the "master_password" table
+    result = sqlite_obj.getDataFromTable("master_password", raiseConversionError=True, omitID=False)
+    
+    if not result[1]:  # No master password set
+        return None
 
-    stored_hashed_password = base64.b64decode(stored_data[0])
+    stored_hashed_password = result[1][0][1]  # The first row (0), second column (1) is the hashed password
+
+    # Decode the base64-encoded hashed password
+    try:
+        stored_hashed_password = base64.b64decode(stored_hashed_password)
+    except Exception as e:
+        print(f"Error decoding hashed password: {e}")
+        return None
+
+    # Extract the salt and stored key
     salt = stored_hashed_password[:16]  # Extract the salt
     stored_key = stored_hashed_password[16:]  # Extract the stored key
 
-    # Derive the key from entered password
+    # Derive the key from the entered password
     entered_key = derive_key(entered_password, salt)
 
     if entered_key == stored_key:
-        return entered_key  # Return the actual key instead of True
+        return entered_key  # Return the actual key if the password is correct
     return None  # Return None if the password is incorrect
 
 # Get recovery keys from the database
@@ -418,157 +346,268 @@ def decrypt_things(encrypted_text, key, aes_bits):
 
 # Database setup
 def setup_database():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
+    """Initialize the encrypted database with the database password"""
+    global sqlite_obj
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS master_password (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        hashed_password TEXT NOT NULL)''')
+    """Create tables using pysqlitecipher"""
+    # Master password table
+    col_list = [
+        # ["id", "INT PRIMARY KEY AUTOINCREMENT"],
+        ["hashed_password", "TEXT"]
+    ]
+    sqlite_obj.createTable("master_password", col_list, makeSecure=True, commit=True)
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS recovery_keys (
-                        id INTEGER PRIMARY KEY,
-                        hashed_key TEXT NOT NULL)''')
+    # Recovery keys table
+    col_list = [
+        # ["id", "INT PRIMARY KEY"],
+        ["hashed_key", "TEXT"]
+    ]
+    sqlite_obj.createTable("recovery_keys", col_list, makeSecure=True, commit=True)
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS passwords (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        platformName TEXT NOT NULL,
-        platformLabel TEXT NOT NULL,
-        platformUser TEXT NOT NULL,
-        encryptedPassword TEXT NOT NULL,
-        platformURL TEXT,
-        platformNote TEXT,
-        createdAt TEXT NOT NULL,
-        updatedAt TEXT NOT NULL,
-        aes_bits INTEGER NOT NULL,
-        mp_reprompt BOOLEAN DEFAULT 1,
-        isFavourite BOOLEAN DEFAULT 0,
-        isDeleted BOOLEAN DEFAULT 0,
-        deletedAt TEXT DEFAULT NULL       
-    )''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS password_criteria (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        length INTEGER NOT NULL,
-        include_uppercase BOOLEAN NOT NULL,
-        include_lowercase BOOLEAN NOT NULL,
-        include_digits BOOLEAN NOT NULL,
-        include_minus BOOLEAN NOT NULL,
-        include_underline BOOLEAN NOT NULL,
-        include_space BOOLEAN NOT NULL,
-        include_special BOOLEAN NOT NULL,
-        include_brackets BOOLEAN NOT NULL,
-        include_latin1 BOOLEAN NOT NULL
-    )''')
+    # Passwords table
+    col_list = [
+        ["id", "INT PRIMARY KEY AUTOINCREMENT"],
+        ["platformName", "TEXT"],
+        ["platformLabel", "TEXT"],
+        ["platformUser", "TEXT"],
+        ["encryptedPassword", "TEXT"],  # Will be automatically encrypted
+        ["platformURL", "TEXT"],
+        ["platformNote", "TEXT"],
+        ["createdAt", "TEXT"],
+        ["updatedAt", "TEXT"],
+        ["aes_bits", "INT"],
+        ["mp_reprompt", "BOOLEAN"],
+        ["isFavourite", "BOOLEAN"],
+        ["isDeleted", "BOOLEAN"],
+        ["deletedAt", "TEXT"]
+    ]
+    sqlite_obj.createTable("passwords", col_list, makeSecure=True, commit=True)
 
-    # Drop the old settings table if it exists
-    # cursor.execute('''DROP TABLE IF EXISTS settings''')
+    # Password criteria table
+    col_list = [
+        ["length", "INTEGER"],
+        ["include_uppercase", "BOOLEAN"],
+        ["include_lowercase", "BOOLEAN"],
+        ["include_digits", "BOOLEAN"],
+        ["include_minus", "BOOLEAN"],
+        ["include_underline", "BOOLEAN"],
+        ["include_space", "BOOLEAN"],
+        ["include_special", "BOOLEAN"],
+        ["include_brackets", "BOOLEAN"],
+        ["include_latin1", "BOOLEAN"]
+    ]
+    sqlite_obj.createTable("password_criteria", col_list, makeSecure=True, commit=True)
+
+    # Insert default criteria if empty
+    result = sqlite_obj.getDataFromTable("password_criteria", raiseConversionError=False, omitID=True)
     
-    cursor.execute('''CREATE TABLE IF NOT EXISTS attack_settings (
-        dictionary_path TEXT,
-        rainbow_table_path TEXT,
-        guess_per_sec INTEGER DEFAULT 3000000,
-        thread_count INTEGER DEFAULT 1,
-        guess_per_sec_threshold INTEGER DEFAULT 10000000,
-        default_dictionary_path TEXT,
-        default_rainbow_table_path TEXT,
-        default_guess_per_sec INTEGER DEFAULT 3000000,
-        default_thread_count INTEGER DEFAULT 1,
-        default_guess_per_sec_threshold INTEGER DEFAULT 10000000
-    )''')
+    if not result[1]:  # If there are no rows in the table
+        sqlite_obj.insertIntoTable("password_criteria", [12, True, True, True, True, True, False, True, True, False],
+            commit=True
+        )
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS rainbow_crack_time (
-        length INTEGER PRIMARY KEY,
-        base_time REAL NOT NULL
-    )''')
-
-    cursor.execute('''CREATE TABLE IF NOT EXISTS settings (
-        mfa BOOLEAN NOT NULL,
-        alerts BOOLEAN NOT NULL,
-        backup BOOLEAN NOT NULL,
-        autologout INTEGER NOT NULL,
-        clipboard_timer INTEGER NOT NULL,
-        otp_secret TEXT,
-        backup_path TEXT           
-    )''')
+    # Settings table
+    col_list = [
+        ["mfa", "BOOLEAN"],
+        ["alerts", "BOOLEAN"],
+        ["backup", "BOOLEAN"],
+        ["autologout", "INTEGER"],
+        ["clipboard_timer", "INTEGER"],
+        ["otp_secret", "TEXT"],
+        ["backup_path", "TEXT"]
+    ]
+    sqlite_obj.createTable("settings", col_list, makeSecure=False, commit=True)
     
-    # Simplified login attempts table
-    cursor.execute('''CREATE TABLE IF NOT EXISTS login_attempts (
-                        attempts INTEGER DEFAULT 0,
-                        last_attempt TIMESTAMP,
-                        lockout_until TIMESTAMP)''')
-
-    # Initialize if empty
-    cursor.execute("SELECT COUNT(*) FROM login_attempts")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO login_attempts (attempts) VALUES (0)")
-
-    # Insert default password criteria if the table is empty
-    cursor.execute("SELECT COUNT(*) FROM password_criteria")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute('''INSERT INTO password_criteria (length, include_uppercase, include_lowercase, include_digits, include_minus, include_underline, include_space, include_special, include_brackets, include_latin1)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                       (12, True, True, True, True, True, False, True, True, False))
-        
-    # Insert default settings if the table is empty
-    cursor.execute("SELECT COUNT(*) FROM settings")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute('''INSERT INTO settings (mfa, alerts, backup, autologout, clipboard_timer, otp_secret, backup_path)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)''', (False, True, False, 3000, 10, '', './Backup'))
-            
-    # Insert default settings if not exists
-    cursor.execute("SELECT COUNT(*) FROM attack_settings")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute('''INSERT INTO attack_settings (
-            dictionary_path, rainbow_table_path, 
-            guess_per_sec, thread_count, guess_per_sec_threshold, default_dictionary_path, default_rainbow_table_path,
-            default_guess_per_sec, default_thread_count, default_guess_per_sec_threshold
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
-        ("./Dictionary", "./Rainbow_Table", 3000000, 1, 10000000, "./Dictionary", "./Rainbow_Table", 3000000, 1, 10000000))
+    # Insert default settings if empty
+    result = sqlite_obj.getDataFromTable("settings", raiseConversionError=False, omitID=True)
     
-    cursor.execute("SELECT COUNT(*) FROM rainbow_crack_time")
-    if cursor.fetchone()[0] == 0:
-        crack_times = [
-            (0, 0.001),  # seconds (base time for 1 thread)
-            (1, 0.001),
-            (2, 0.001),
-            (3, 0.01),
-            (4, 0.1),
-            (5, 1.0),
-            (6, 10.0),
-            (7, 60.0)
-        ]
-        cursor.executemany("INSERT INTO rainbow_crack_time (length, base_time) VALUES (?, ?)", crack_times)
-    conn.commit()
-    conn.close()
+    if not result[1]:  # If there are no rows in the table
+        sqlite_obj.insertIntoTable(
+            "settings",
+            [False, True, False, 3000, 10, "", "./Backup"],
+            commit=True
+        )
 
-# Load passwords from the database and display in the table
-def load_passwords():
-    for row in tree.get_children():
-        tree.delete(row)  # Clear existing rows
-
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM passwords")
-    records = cursor.fetchall()
-    conn.close()
+    # Attack settings table
+    col_list = [
+        ["dictionary_path", "TEXT"],
+        ["rainbow_table_path", "TEXT"],
+        ["guess_per_sec", "INTEGER"],
+        ["thread_count", "INTEGER"],
+        ["guess_per_sec_threshold", "INTEGER"],
+        ["default_dictionary_path", "TEXT"],
+        ["default_rainbow_table_path", "TEXT"],
+        ["default_guess_per_sec", "INTEGER"],
+        ["default_thread_count", "INTEGER"],
+        ["default_guess_per_sec_threshold", "INTEGER"]
+    ]
+    sqlite_obj.createTable("attack_settings", col_list, makeSecure=True, commit=True)
     
-    if records:
-        for row in records:
-            decrypted_password = decrypt_things(row[4], key, row[8])  # Decrypt the password
-            if decrypted_password is None:
-                global root
-                messagebox.showerror("Invalid Password", "Incorrect master password. Please retry.")
-                
-                if root:
-                    root.destroy()  # Close the current window
+    # Insert default attack settings if empty
+    result = sqlite_obj.getDataFromTable("attack_settings", raiseConversionError=False, omitID=True)
+    
+    if not result[1]:  # If there are no rows in the table
+        sqlite_obj.insertIntoTable(
+            "attack_settings",
+            ["./Dictionary", "./Rainbow_Table", 3000000, 1, 10000000, 
+             "./Dictionary", "./Rainbow_Table", 3000000, 1, 10000000],
+            commit=True
+        )
 
-                # Reset global references
-                root = None
-                
-                # Restart application
-                main()
-            masked_password = '*' * 10  # Mask password with asterisks
-            # Insert all the fields including the id
-            tree.insert("", tk.END, values=(row[0], row[1], row[2], row[3], masked_password, row[5], row[6], row[7], row[8] , decrypted_password, row[9]))
+    # Rainbow crack time table
+    col_list = [
+        ["length", "INTEGER PRIMARY KEY"],
+        ["base_time", "REAL"]
+    ]
+    sqlite_obj.createTable("rainbow_crack_time", col_list, makeSecure=True, commit=True)
+    
+    # Insert default attack settings if empty
+    result = sqlite_obj.getDataFromTable("rainbow_crack_time", raiseConversionError=False, omitID=True)
+    
+    if not result[1]:  # If there are no rows in the table
+        sqlite_obj.insertIntoTable(
+            "rainbow_crack_time",
+            [0, 0.001],  # seconds (base time for 1 thread)
+            commit=True
+        )
+        sqlite_obj.insertIntoTable(
+            "rainbow_crack_time",
+            [1, 0.001],
+            commit=True
+        )
+        sqlite_obj.insertIntoTable(
+            "rainbow_crack_time",
+            [2, 0.001],
+            commit=True
+        )        
+        sqlite_obj.insertIntoTable(
+            "rainbow_crack_time",
+            [3, 0.01],
+            commit=True
+        )        
+        sqlite_obj.insertIntoTable(
+            "rainbow_crack_time",
+            [4, 0.1],
+            commit=True
+        )       
+        sqlite_obj.insertIntoTable(
+            "rainbow_crack_time",
+            [5, 1.0],
+            commit=True
+        )        
+        sqlite_obj.insertIntoTable(
+            "rainbow_crack_time",
+            [6, 10.0],
+            commit=True
+        )
+        sqlite_obj.insertIntoTable(
+            "rainbow_crack_time",
+            [7, 60.0],
+            commit=True
+        )
+
+    # Login attempts table
+    col_list = [
+        ["attempts", "INTEGER"],
+        ["last_attempt", "TIMESTAMP"],
+        ["lockout_until", "TIMESTAMP"]
+    ]
+    sqlite_obj.createTable("login_attempts", col_list, makeSecure=True, commit=True)
+    
+    # Initialize login attempts if empty
+    result = sqlite_obj.getDataFromTable("login_attempts", raiseConversionError=False, omitID=True)
+    
+    if not result[1]:  # If there are no rows in the table
+        sqlite_obj.insertIntoTable("login_attempts", [0, None, None], commit=True)
+
+def reset_timer(event=None):
+    global last_activity_time
+    last_activity_time = time.time()
+
+def check_inactivity(root):
+    global last_activity_time
+    current_time = time.time()
+    inactivity_period = current_time - last_activity_time
+
+    if inactivity_period > int(settings[3]):  # settings[3] is the autologout time in seconds
+        lock_system(root)
+
+    # Pass the function reference, not the function call
+    root.after(1000, lambda: check_inactivity(root))  # Check every second
+
+def lock_system(root):
+    # Destroy existing main window if it exists
+    if root:
+        root.destroy()
+        root = None
+
+    # Create a new root window for the lock screen
+    lock_window = tk.Tk()
+    lock_window.title("Session Locked")
+    lock_window.geometry("400x200")
+    lock_window.attributes('-topmost', True)  # Keep the window on top
+    lock_window.resizable(False, False)
+
+    # Center the window on the screen
+    lock_window.update_idletasks()
+    screen_width = lock_window.winfo_screenwidth()
+    screen_height = lock_window.winfo_screenheight()
+    x = (screen_width // 2) - (400 // 2)
+    y = (screen_height // 2) - (200 // 2)
+    lock_window.geometry(f"+{x}+{y}")
+
+    # Make the window modal and handle close button
+    lock_window.grab_set()
+    lock_window.protocol("WM_DELETE_WINDOW", lambda: unlock_session(lock_window))
+
+    # Message and unlock button
+    tk.Label(lock_window, text="Your session has been locked due to inactivity.", font=("Arial", 12)).pack(pady=40)
+    tk.Button(lock_window, text="Unlock", command=lambda: unlock_session(lock_window)).pack()
+
+    lock_window.mainloop()
+
+def unlock_session(lock_window):
+    # Close the lock screen and restart your application
+    lock_window.destroy()
+    main()  # Restart your main application
+
+def show_tooltip(widget, text):
+    global tooltip
+    hide_tooltip()
+    x = widget.winfo_rootx() + widget.winfo_width() + 10
+    y = widget.winfo_rooty() + 10
+
+    tooltip = tk.Toplevel(widget)
+    tooltip.wm_overrideredirect(True)
+    tooltip.wm_geometry(f"+{x}+{y}")
+    tooltip.configure(bg="#333333")
+
+    frame = tk.Frame(tooltip, bg="#333333", bd=0, highlightthickness=0)
+    frame.pack(padx=1, pady=1)
+
+    label = tk.Label(
+        frame,
+        text=text,
+        bg="#ffffff",
+        fg="#333333",
+        padx=10,
+        pady=6,
+        font=("Segoe UI", 10),
+        wraplength=200,
+        justify="left",
+        relief="flat",
+        bd=0
+    )
+    label.pack()
+
+    # Optional drop shadow effect
+    tooltip.lift()
+    tooltip.attributes("-topmost", True)
+
+def hide_tooltip():
+    global tooltip
+    if 'tooltip' in globals() and tooltip.winfo_exists():
+        tooltip.destroy()
 
 def open_password_generation_form(parent_window):
     if hasattr(open_password_generation_form, "password_config_window") and \
@@ -4471,9 +4510,9 @@ def open_aes_evaluation_window(parent_window, current_password, aes_bit_var):
     conn.close()
 
     # Set default values if no settings found
-    guess_per_sec = settings[0] if settings else 3000000
-    thread_count = settings[1] if settings else 1
-    guess_per_sec_threshold = settings[2] if settings else 10000000
+    guess_per_sec = settings[1] if settings else 3000000
+    thread_count = settings[2] if settings else 1
+    guess_per_sec_threshold = settings[3] if settings else 10000000
 
     # Guess Rate
     tk.Label(main_frame, text="Guess Rate (per sec):", bg="#f0f0f0").grid(row=1, column=0, padx=5, pady=5, sticky="w")
@@ -5918,19 +5957,27 @@ def show_settings_content(root):
         button.pack(fill=tk.X, pady=5, padx=5)
 
 def automatic_backup():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT backup, backup_path FROM settings")
-    enabled, path = cursor.fetchone()
-    conn.close()
+    global sqlite_obj
     
-    if enabled:
+    # Fetch backup enabled status and backup path from the "settings" table
+    result = sqlite_obj.getDataFromTable("settings", raiseConversionError=True, omitID=True)
+    
+    if not result[1]:  # If no settings found, return early
+        print("Settings not found.")
+        return
+    
+    # Get the backup settings (enabled and path)
+    enabled= result[1][0][2] 
+    path = result[1][0][6]
+
+    if enabled  == 'True':
         try:
             os.makedirs(path, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_file = os.path.join(path, f"backup_{timestamp}.db")
             shutil.copy(DB_FILE, backup_file)
             # Optional: Add backup rotation here
+            print(f"Backup successfully created at {backup_file}")
         except Exception as e:
             print(f"Backup failed: {str(e)}")
 
@@ -5941,70 +5988,85 @@ def schedule_backups():
 
 
 def load_settings():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM settings LIMIT 1")
-    settings = cursor.fetchone()
-    conn.close()
-    if settings is None:
-        # Initialize with default values if no settings are found
-        settings = (False, True, False, 600, 10, '', './Backup')
+    global sqlite_obj
+
+    # Fetch the settings from the "settings" table
+    result = sqlite_obj.getDataFromTable("settings", raiseConversionError=True, omitID=True)
+    
+    # Get the first row of settings
+    settings = result[1][0]  # Assuming the first row contains the settings
     return settings
 
 def increment_login_attempt():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
+    global sqlite_obj
     
-    cursor.execute("SELECT attempts FROM login_attempts LIMIT 1")
-    current_attempts = cursor.fetchone()[0]
+    # Fetch the current attempts and lockout_until from the "login_attempts" table
+    result = sqlite_obj.getDataFromTable("login_attempts", raiseConversionError=True, omitID=False)
+    
+    if not result[1]:  # If there are no rows, initialize the login attempts data
+        sqlite_obj.insertIntoTable("login_attempts", [0, None, None], commit=True)
+        return 1  # The first login attempt
+    
+    # Get the first row (attempts, lockout_until) and its ID
+    id_value, current_attempts, last_attempt, lockout_until_str = result[1][0]  # The first element is the ID
+    
     new_attempts = current_attempts + 1
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     if new_attempts >= 5:
+        # Lock the account for 1 hour
         lockout_until = datetime.now() + timedelta(hours=1)
-        cursor.execute("""UPDATE login_attempts 
-                        SET attempts=?, last_attempt=?, lockout_until=?""",
-                      (new_attempts, current_time, lockout_until.isoformat()))
+        sqlite_obj.updateInTable("login_attempts", id_value, "attempts", new_attempts, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("login_attempts", id_value, "last_attempt", current_time, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("login_attempts", id_value, "lockout_until", lockout_until.isoformat(), commit=True, raiseError=True)
     else:
-        cursor.execute("""UPDATE login_attempts 
-                        SET attempts=?, last_attempt=?""",
-                      (new_attempts, current_time))
+        # No lockout, just increment the attempts and update the last attempt time
+        sqlite_obj.updateInTable("login_attempts", id_value, "attempts", new_attempts, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("login_attempts", id_value, "last_attempt", current_time, commit=True, raiseError=True)
     
-    conn.commit()
-    conn.close()
     return new_attempts
 
 def check_lockout_status():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT attempts, lockout_until FROM login_attempts LIMIT 1")
-    row = cursor.fetchone()
+    global sqlite_obj
     
-    if not row:
-        conn.close()
+    # Fetch login attempts and lockout_until values from the "login_attempts" table
+    result = sqlite_obj.getDataFromTable("login_attempts", raiseConversionError=True, omitID=False)
+    
+    if not result[1]:  # If there are no rows, assume no lockout
         return False, None
     
-    attempts, lockout_until_str = row
+    # Get the first row (attempts, lockout_until) and its ID
+    id_value, attempts, last_attempt, lockout_until_str = result[1][0]  # The first element is the ID
     lockout_until = None
-    if lockout_until_str:
+    
+    if lockout_until_str and lockout_until_str != 'None':
         lockout_until = datetime.fromisoformat(lockout_until_str)
         if datetime.now() < lockout_until:
-            conn.close()
+            # Lockout is still active
             return True, lockout_until
         else:
-            # Reset expired lockout
-            cursor.execute("UPDATE login_attempts SET attempts=0, lockout_until=NULL")
-            conn.commit()
+            # Reset expired lockout by using updateInTable
+            sqlite_obj.updateInTable("login_attempts", id_value, "attempts", 0, commit=True, raiseError=True)
+            sqlite_obj.updateInTable("login_attempts", id_value, "lockout_until", None, commit=True, raiseError=True)
     
-    conn.close()
+    # If no lockout, return False
     return False, None
 
 def reset_login_attempts():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE login_attempts SET attempts = 0, lockout_until = NULL")
-    conn.commit()
-    conn.close()
+    global sqlite_obj
+    
+    # Fetch the ID of the row in the "login_attempts" table
+    result = sqlite_obj.getDataFromTable("login_attempts", raiseConversionError=True, omitID=False)
+    
+    if not result[1]:  # If there are no rows, we can't reset attempts
+        return
+    
+    # Get the ID from the first row
+    id_value = result[1][0][0]  # Assuming the first column is the ID
+
+    # Reset the attempts and lockout_until fields to 0 and NULL respectively
+    sqlite_obj.updateInTable("login_attempts", id_value, "attempts", 0, commit=True, raiseError=True)
+    sqlite_obj.updateInTable("login_attempts", id_value, "lockout_until", None, commit=True, raiseError=True)
 
 toaster = WindowsToaster("Password Manager")
 
@@ -6093,8 +6155,52 @@ def toggle_scrolling(enable, root):
     if not enable:
         canvas.yview_moveto(0)
 
+def transform_key(seed: int) -> str:
+    """Generate a dynamic key using mathematical transformations"""
+    key = []
+    # Multi-step transformation using bitwise operations
+    a = (seed ^ 0xDEADBEEF) + 0x2F7A83C
+    b = (a << 3) | (a >> 29)
+    c = b ^ 0x8C9A6B5
+    d = (c * 0x2D) & 0xFFFFFFFF
+    
+    # Convert to characters using selective bit masking
+    for i in range(12):
+        val = d >> (i * 3) & 0x7F
+        if 33 <= val <= 126:  # Printable ASCII range
+            key.append(chr(val))
+        else:
+            key.append(chr((val % 93) + 33))
+    
+    return ''.join(key)
+
+def decode_password(encoded: bytes, key: str) -> str:
+    """XOR decoding with key rotation"""
+    return bytes([b ^ ord(key[i % len(key)]) for i, b in enumerate(encoded)]).decode()
+
+def get_db_password() -> str:
+    """Retrieve password through multiple obfuscation layers"""
+    # Layer 1: Encoded byte sequence (appears as random bytes)
+    encoded = b'\x12\x45\x28\x7C\x53\x69\x3F\x1A\x6E\x44\x22\x57\x31\x4A'
+    
+    # Layer 2: Dynamic key generation from mathematical seed
+    key_seed = 0x6F2C8A1  # Appears as a random constant
+    dynamic_key = transform_key(key_seed)
+    
+    # Layer 3: Multiple decoding passes
+    temp = decode_password(encoded, dynamic_key)
+    final = decode_password(temp.encode(), dynamic_key[::-1])
+    
+    # Layer 4: Final transformation
+    return final.swapcase().translate(str.maketrans('s5!3', '$S%3'))
+
 def main(): 
     global master_password
+    global sqlite_obj
+    global db_password 
+
+    # Get password through obfuscation layers
+    db_password = get_db_password()
 
     # Check if the database exists
     if not os.path.exists(DB_FILE):
@@ -6102,31 +6208,23 @@ def main():
         if master_password is None:
             return  # Exit if user cancels
 
-        # Setup the new database
-        setup_database()
-        store_master_password(master_password)
-        schedule_backups()
-        messagebox.showinfo("Success", "New password database created successfully!")
-
-    # Check if master password is set
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM master_password")
-    master_password_set = cursor.fetchone()[0] > 0
-    conn.close()
-
-    if not master_password_set:
-        # First-time setup
-        master_password = ask_initial_master_password(root)
-        if master_password is None:
-            return  # Exit if user cancels
+        sqlite_obj = sqlitewrapper.SqliteCipher(
+            dataBasePath=DB_FILE,
+            checkSameThread=False,
+            password=db_password
+        )
 
         # Setup the new database
         setup_database()
         store_master_password(master_password)
-        schedule_backups()
         messagebox.showinfo("Success", "New password database created successfully!")
+        main()
     else:
+        sqlite_obj = sqlitewrapper.SqliteCipher(
+            dataBasePath=DB_FILE,
+            checkSameThread=False,
+            password=db_password
+        )
         #Login
         def show_login_screen():
             global login_root
@@ -6387,7 +6485,7 @@ def main():
         def check_mfa_and_show_main_window():
             global settings
             settings = load_settings()
-            if settings[0]:  # MFA is enabled
+            if settings[0] == 'True': # MFA is enabled
                 encrypted_otp_secret = settings[5]
                 if verify_otp(encrypted_otp_secret):
                     show_main_window()
