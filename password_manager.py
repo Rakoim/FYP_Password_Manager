@@ -246,14 +246,28 @@ def verify_master_password(entered_password):
 
 # Get recovery keys from the database
 def get_recovery_keys():
+    global sqlite_obj
     """Retrieve the hashed recovery keys from the database."""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT hashed_key FROM recovery_keys")
-    hashed_recovery_keys = [row[0] for row in cursor.fetchall()]
-    conn.close()
-    return hashed_recovery_keys
+    try:
+        # Fetch hashed recovery keys from the database using sqlite_obj
+        result = sqlite_obj.getDataFromTable(
+            "recovery_keys", 
+            raiseConversionError=True,
+            omitID=True
+        )
+        
+        # Extract the hashed recovery keys from the result
+        if result[1]:
+            hashed_recovery_keys = [row[0] for row in result[1]]
+        else:
+            hashed_recovery_keys = []
 
+        return hashed_recovery_keys
+
+    except Exception as e:
+        print(f"Error fetching recovery keys: {e}")
+        return []
+    
 # Verify recovery key
 def verify_recovery_key(entered_key, hashed_recovery_keys):
     """Check if the entered recovery key is valid."""
@@ -366,7 +380,6 @@ def setup_database():
 
     # Passwords table
     col_list = [
-        ["id", "INT PRIMARY KEY AUTOINCREMENT"],
         ["platformName", "TEXT"],
         ["platformLabel", "TEXT"],
         ["platformUser", "TEXT"],
@@ -416,7 +429,7 @@ def setup_database():
         ["otp_secret", "TEXT"],
         ["backup_path", "TEXT"]
     ]
-    sqlite_obj.createTable("settings", col_list, makeSecure=False, commit=True)
+    sqlite_obj.createTable("settings", col_list, makeSecure=True, commit=True)
     
     # Insert default settings if empty
     result = sqlite_obj.getDataFromTable("settings", raiseConversionError=False, omitID=True)
@@ -465,11 +478,6 @@ def setup_database():
     result = sqlite_obj.getDataFromTable("rainbow_crack_time", raiseConversionError=False, omitID=True)
     
     if not result[1]:  # If there are no rows in the table
-        sqlite_obj.insertIntoTable(
-            "rainbow_crack_time",
-            [0, 0.001],  # seconds (base time for 1 thread)
-            commit=True
-        )
         sqlite_obj.insertIntoTable(
             "rainbow_crack_time",
             [1, 0.001],
@@ -610,6 +618,7 @@ def hide_tooltip():
         tooltip.destroy()
 
 def open_password_generation_form(parent_window):
+    global sqlite_obj
     if hasattr(open_password_generation_form, "password_config_window") and \
        open_password_generation_form.password_config_window.winfo_exists():
         open_password_generation_form.password_config_window.lift()
@@ -641,22 +650,54 @@ def open_password_generation_form(parent_window):
     main_frame.pack(pady=10, fill=tk.BOTH, expand=True)
     main_frame.grid_columnconfigure(1, weight=1)
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM password_criteria ORDER BY id DESC LIMIT 1")
-    criteria = cursor.fetchone()
-    conn.close()
+    # Fetch password criteria using sqlite_obj
+    try:
+        # Fetch the latest criteria from the database using sqlite_obj
+        result = sqlite_obj.getDataFromTable(
+            "password_criteria",
+            raiseConversionError=True,
+            omitID=True
+        )
 
-    length = criteria[1] if criteria else 12
-    include_uppercase = criteria[2] if criteria else True
-    include_lowercase = criteria[3] if criteria else True
-    include_digits = criteria[4] if criteria else True
-    include_minus = criteria[5] if criteria else True
-    include_underline = criteria[6] if criteria else True
-    include_space = criteria[7] if criteria else False
-    include_special = criteria[8] if criteria else True
-    include_brackets = criteria[9] if criteria else True
-    include_latin1 = criteria[10] if criteria else False
+        # Extract values if found, otherwise use default values
+        if result[1]:
+            criteria = result[1][0]  # Get the first row
+            length = criteria[0]
+            include_uppercase = criteria[1]
+            include_lowercase = criteria[2]
+            include_digits = criteria[3]
+            include_minus = criteria[4]
+            include_underline = criteria[5]
+            include_space = criteria[6]
+            include_special = criteria[7]
+            include_brackets = criteria[8]
+            include_latin1 = criteria[9]
+        else:
+            # Default values if no criteria found
+            length = 12
+            include_uppercase = True
+            include_lowercase = True
+            include_digits = True
+            include_minus = True
+            include_underline = True
+            include_space = False
+            include_special = True
+            include_brackets = True
+            include_latin1 = False
+
+    except Exception as e:
+        print(f"Error fetching password criteria: {e}")
+        # Default values in case of an error
+        length = 12
+        include_uppercase = True
+        include_lowercase = True
+        include_digits = True
+        include_minus = True
+        include_underline = True
+        include_space = False
+        include_special = True
+        include_brackets = True
+        include_latin1 = False
 
     # Input fields
     def add_option(row, label, var):
@@ -716,17 +757,27 @@ def open_password_generation_form(parent_window):
                 include_latin1_var.get()
             )
 
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE password_criteria
-                SET length=?, include_uppercase=?, include_lowercase=?, include_digits=?,
-                    include_minus=?, include_underline=?, include_space=?, include_special=?,
-                    include_brackets=?, include_latin1=?
-                WHERE id = (SELECT id FROM password_criteria LIMIT 1)
-            """, values)
-            conn.commit()
-            messagebox.showinfo("Success", "Password criteria saved successfully!")
+            # Update password criteria using sqlite_obj
+            try:
+                result = sqlite_obj.getDataFromTable("password_criteria", raiseConversionError = True , omitID = False)
+                id_value = result[1][0][0]
+
+                # Perform the update using sqlite_objted
+                sqlite_obj.updateInTable("password_criteria", id_value, "length", values[0], commit=True, raiseError=True)
+                sqlite_obj.updateInTable("password_criteria", id_value, "include_uppercase", values[1], commit=True, raiseError=True)
+                sqlite_obj.updateInTable("password_criteria", id_value, "include_lowercase", values[2], commit=True, raiseError=True)
+                sqlite_obj.updateInTable("password_criteria", id_value, "include_digits", values[3], commit=True, raiseError=True)
+                sqlite_obj.updateInTable("password_criteria", id_value, "include_minus", values[4], commit=True, raiseError=True)
+                sqlite_obj.updateInTable("password_criteria", id_value, "include_underline", values[5], commit=True, raiseError=True)
+                sqlite_obj.updateInTable("password_criteria", id_value, "include_space", values[6], commit=True, raiseError=True)
+                sqlite_obj.updateInTable("password_criteria", id_value, "include_special", values[7], commit=True, raiseError=True)
+                sqlite_obj.updateInTable("password_criteria", id_value, "include_brackets", values[8], commit=True, raiseError=True)
+                sqlite_obj.updateInTable("password_criteria", id_value, "include_latin1", values[9], commit=True, raiseError=True)
+                messagebox.showinfo("Success", "Password criteria saved successfully!")
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save password criteria: {e}")
+
 
         except ValueError as ve:
             messagebox.showerror("Validation Error", str(ve))
@@ -734,12 +785,10 @@ def open_password_generation_form(parent_window):
             messagebox.showerror("Database Error", str(e))
         except Exception as e:
             messagebox.showerror("Error", str(e))
-        finally:
-            if 'conn' in locals():
-                conn.close()
-            parent_window.lift()
-            password_config_window.lift()
-            password_config_window.focus()
+
+        parent_window.lift()
+        password_config_window.lift()
+        password_config_window.focus()
 
     def reset_to_default_criteria():
         if not messagebox.askyesno("Reset Criteria", "Reset to default criteria?"):
@@ -771,22 +820,24 @@ def open_password_generation_form(parent_window):
         include_latin1_var.set(defaults["include_latin1"])
 
         try:
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE password_criteria
-                SET length=?, include_uppercase=?, include_lowercase=?, include_digits=?,
-                    include_minus=?, include_underline=?, include_space=?, include_special=?,
-                    include_brackets=?, include_latin1=?
-                WHERE id = (SELECT id FROM password_criteria LIMIT 1)
-            """, tuple(defaults.values()))
-            conn.commit()
+            result = sqlite_obj.getDataFromTable("password_criteria", raiseConversionError = True , omitID = False)
+            id_value = result[1][0][0]
+
+            # Perform the update using sqlite_objted
+            sqlite_obj.updateInTable("password_criteria", id_value, "length", 12, commit=True, raiseError=True)
+            sqlite_obj.updateInTable("password_criteria", id_value, "include_uppercase", True, commit=True, raiseError=True)
+            sqlite_obj.updateInTable("password_criteria", id_value, "include_lowercase", True, commit=True, raiseError=True)
+            sqlite_obj.updateInTable("password_criteria", id_value, "include_digits", True, commit=True, raiseError=True)
+            sqlite_obj.updateInTable("password_criteria", id_value, "include_minus", True, commit=True, raiseError=True)
+            sqlite_obj.updateInTable("password_criteria", id_value, "include_underline", True, commit=True, raiseError=True)
+            sqlite_obj.updateInTable("password_criteria", id_value, "include_space", False, commit=True, raiseError=True)
+            sqlite_obj.updateInTable("password_criteria", id_value, "include_special", True, commit=True, raiseError=True)
+            sqlite_obj.updateInTable("password_criteria", id_value, "include_brackets", True, commit=True, raiseError=True)
+            sqlite_obj.updateInTable("password_criteria", id_value, "include_latin1", False, commit=True, raiseError=True)
+        
             messagebox.showinfo("Reset", "Password criteria reset to default.")
         except Exception as e:
             messagebox.showerror("Error", str(e))
-        finally:
-            if 'conn' in locals():
-                conn.close()
 
         parent_window.lift()
         password_config_window.lift()
@@ -811,6 +862,7 @@ def generate_password(length=12, characters=None):
     return ''.join(random.choice(characters) for _ in range(length))
 
 def generate_now(ui_context):
+    global sqlite_obj
     """Generate a strong password based on stored criteria and update UI."""
     entry_password = ui_context["entry_password"]
     parent_window = ui_context["parent_window"]
@@ -828,30 +880,37 @@ def generate_now(ui_context):
             return  # User canceled
 
     # Load password criteria from the database
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM password_criteria ORDER BY id DESC LIMIT 1")
-    criteria = cursor.fetchone()
-    conn.close()
+    try:
+        # Fetch the latest password criteria from the database
+        result = sqlite_obj.getDataFromTable(
+            "password_criteria", 
+            raiseConversionError=True,
+            omitID=True
+        )
+        
+        if result[1]:
+            criteria = result[1][0]  # Get the first (and only) row
+            length, include_uppercase, include_lowercase, include_digits, include_minus, \
+            include_underline, include_space, include_special, include_brackets, include_latin1 = criteria[0:]
+        else:
+            messagebox.showwarning("Criteria Error", "No password generation criteria found.", parent=parent_window)
+            return
 
-    if not criteria:
-        messagebox.showwarning("Criteria Error", "No password generation criteria found.", parent=parent_window)
+    except Exception as e:
+        messagebox.showerror("Database Error", f"Failed to load password criteria: {e}", parent=parent_window)
         return
-
-    length, include_uppercase, include_lowercase, include_digits, include_minus, \
-    include_underline, include_space, include_special, include_brackets, include_latin1 = criteria[1:]
 
     # Build character set
     characters = ""
-    if include_uppercase:  characters += string.ascii_uppercase
-    if include_lowercase:  characters += string.ascii_lowercase
-    if include_digits:     characters += string.digits
-    if include_minus:      characters += "-"
-    if include_underline:  characters += "_"
-    if include_space:      characters += " "
-    if include_special:    characters += "!\"#$%&'*+,-./:;=?@\\^_`|~"
-    if include_brackets:   characters += "[]{}()<>"
-    if include_latin1:     characters += ''.join(chr(i) for i in range(160, 256))
+    if include_uppercase == 'True':  characters += string.ascii_uppercase
+    if include_lowercase == 'True':  characters += string.ascii_lowercase
+    if include_digits == 'True':     characters += string.digits
+    if include_minus == 'True':      characters += "-"
+    if include_underline == 'True':  characters += "_"
+    if include_space == 'True':      characters += " "
+    if include_special == 'True':    characters += "!\"#$%&'*+,-./:;=?@\\^_`|~"
+    if include_brackets == 'True':   characters += "[]{}()<>"
+    if include_latin1 == 'True':     characters += ''.join(chr(i) for i in range(160, 256))
 
     if not characters:
         messagebox.showwarning("Selection Error", "Please select at least one character type.", parent=parent_window)
@@ -859,7 +918,7 @@ def generate_now(ui_context):
 
     max_attempts = 1000  # Limit attempts to avoid infinite loop
     for _ in range(max_attempts):
-        new_password = generate_password(length, characters)
+        new_password = generate_password(int(length), characters)
         if check_password_strength(new_password) == "Strong":
             break
     else:
@@ -1025,6 +1084,7 @@ def get_charset_size(password):
     return max(cs, 1)
 
 def open_guess_rate_window(parent_window, guess_sec_entry): 
+    global sqlite_obj
     if hasattr(open_guess_rate_window, "guess_rate_win") and \
        open_guess_rate_window.guess_rate_win.winfo_exists():
         open_guess_rate_window.guess_rate_win.lift()
@@ -1052,18 +1112,32 @@ def open_guess_rate_window(parent_window, guess_sec_entry):
     # Grid configuration for expansion 
     main_frame.grid_columnconfigure(1, weight=1)
 
-    # Load current settings
-    with sqlite3.connect(DB_FILE) as conn:
-        settings = conn.execute("""
-            SELECT guess_per_sec, thread_count, guess_per_sec_threshold,
-                   default_guess_per_sec, default_thread_count, default_guess_per_sec_threshold
-            FROM attack_settings LIMIT 1
-        """).fetchone()
+    # Load current settings using sqlite_obj
+    try:
+        # Fetch the settings from the database using sqlite_obj
+        result = sqlite_obj.getDataFromTable(
+            "attack_settings", 
+            raiseConversionError=True,
+            omitID=True
+        )
 
-    if settings:
-        current_guess_per_sec, current_thread_count, current_threshold, \
-        default_guess_per_sec, default_thread_count, default_threshold = settings
-    else:
+        if result[1]:
+            # Extract the settings values from the result
+            current_guess_per_sec = result[1][0][2]
+            current_thread_count  = result[1][0][3] 
+            current_threshold = result[1][0][4] 
+            default_guess_per_sec = result[1][0][7]
+            default_thread_count = result[1][0][8]
+            default_threshold = result[1][0][9]
+        else:
+            # Set default values if no settings are found
+            current_guess_per_sec = default_guess_per_sec = 3000000
+            current_thread_count = default_thread_count = 1
+            current_threshold = default_threshold = 10000000
+
+    except Exception as e:
+        print(f"Error fetching attack settings: {e}")
+        # Set default values in case of an error
         current_guess_per_sec = default_guess_per_sec = 3000000
         current_thread_count = default_thread_count = 1
         current_threshold = default_threshold = 10000000
@@ -1110,14 +1184,16 @@ def open_guess_rate_window(parent_window, guess_sec_entry):
 
     def reset_to_defaults():
         if messagebox.askyesno("Confirm Reset", "Are you sure you want to reset to default Guess Rate Configuration?"):
-            with sqlite3.connect(DB_FILE) as conn:
-                conn.execute("""
-                    UPDATE attack_settings 
-                    SET guess_per_sec = default_guess_per_sec,
-                        thread_count = default_thread_count,
-                        guess_per_sec_threshold = default_guess_per_sec_threshold
-                """)
-                conn.commit()
+            # Reset attack settings
+            try:
+                result = sqlite_obj.getDataFromTable("attack_settings", raiseConversionError = True , omitID = False)
+                id = result[1][0][0]
+
+                sqlite_obj.updateInTable("attack_settings" , id , "guess_per_sec" , default_guess_per_sec , commit = True , raiseError = True)
+                sqlite_obj.updateInTable("attack_settings" , id , "thread_count" , default_thread_count , commit = True , raiseError = True)
+                sqlite_obj.updateInTable("attack_settings" , id , "guess_per_sec_threshold" , default_threshold , commit = True , raiseError = True)
+            except Exception as e:
+                print(f"Error resetting attack settings: {e}")
 
             # Update the labels (on main thread)
             guess_rate_win.after(0, lambda: [ 
@@ -1201,14 +1277,16 @@ def open_guess_rate_window(parent_window, guess_sec_entry):
                 message_queue.put("🏁 Guess rate test completed")
                 message_queue.put("")
 
-                with sqlite3.connect(DB_FILE) as conn:
-                    conn.execute("""
-                        UPDATE attack_settings 
-                        SET guess_per_sec = ?, 
-                            thread_count = ?, 
-                            guess_per_sec_threshold = ?
-                    """, (guess_per_sec, thread_count, threshold))
-                    conn.commit()
+                # Update attack settings
+                try:
+                    result = sqlite_obj.getDataFromTable("attack_settings", raiseConversionError = True , omitID = False)
+                    id = result[1][0][0]
+
+                    sqlite_obj.updateInTable("attack_settings" , id , "guess_per_sec" , guess_per_sec , commit = True , raiseError = True)
+                    sqlite_obj.updateInTable("attack_settings" , id , "thread_count" , thread_count , commit = True , raiseError = True)
+                    sqlite_obj.updateInTable("attack_settings" , id , "guess_per_sec_threshold" , threshold , commit = True , raiseError = True)
+                except Exception as e:
+                    print(f"Error updating attack settings: {e}")
 
                 # Update the labels (on main thread)
                 guess_rate_win.after(0, lambda: [
@@ -1362,34 +1440,47 @@ def estimate_crack_time(password, aes_bits, method, dictionary_path, rainbow_pat
 
     # — Rainbow Table — 
     if method == "Rainbow Table":
+        # Rainbow table time estimation
         try:
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute("SELECT base_time FROM rainbow_crack_time WHERE length = ?", (len(password),))
-            result = cursor.fetchone()
-            conn.close()
-
-            if result:
-                base_time = result[0]
-
-                # Get thread count from attack_settings
-                conn = sqlite3.connect(DB_FILE)
-                cursor = conn.cursor()
-                cursor.execute("SELECT thread_count FROM attack_settings LIMIT 1")
-                thread_row = cursor.fetchone()
-                conn.close()
-
-                threads = thread_row[0] if thread_row else 1
-                threads = max(1, threads)  # Avoid divide by zero
+            # Get base_time from rainbow_crack_time
+            rainbow_result = sqlite_obj.getDataFromTable(
+                "rainbow_crack_time", 
+                raiseConversionError=True,
+                omitID=True
+            )
+            
+            base_time = None
+            if rainbow_result[1]:
+                for row in rainbow_result[1]:
+                    if int(row[0]) == len(password):  # First column is length
+                        base_time = row[1]       # Second column is base_time
+                        break
+                    
+            if base_time is None:
+                results["Rainbow Table"] = "No estimate for this password length"
+            else:
+                # Get thread_count from attack_settings
+                attack_result = sqlite_obj.getDataFromTable(
+                    "attack_settings",
+                    raiseConversionError=True,
+                    omitID=True
+                )
+                
+                threads = 1
+                if attack_result[1]:
+                    try:
+                        # Thread count is 4th column (index 3)
+                        threads = max(1, int(attack_result[1][0][3]))
+                    except (TypeError, ValueError):
+                        pass  # Keep default value if conversion fails
 
                 adjusted_time = base_time / threads
                 crack_time = format_time(adjusted_time)
-
                 results["Rainbow Table"] = crack_time
-            else:
-                results["Rainbow Table"] = "No estimate for this password length"
+
         except Exception as e:
             results["Rainbow Table"] = f"Database error: {str(e)}"
+
     else:
         results["Rainbow Table"] = "Rainbow attack disabled"
 
@@ -1414,6 +1505,7 @@ def toggle_password_visibility(entry_password, entry_confirm_password, eye_icon,
         eye_icon.config(image=hide_password_img)
 
 def browse_dictionary_path(entry_widget, window):
+    global sqlite_obj
     """Open file dialog to select dictionary path and save it to the database."""
     path = filedialog.askdirectory(title="Select Dictionary Folder")
     if path:
@@ -1437,7 +1529,27 @@ def browse_dictionary_path(entry_widget, window):
         conn.commit()
         conn.close()
 
+        try:
+            # Fetch the existing dictionary path from the database
+            result = sqlite_obj.getDataFromTable(
+                "attack_settings", 
+                raiseConversionError=True,
+                omitID=True
+            )
+            
+            if result[1]:
+                existing_path = result[1][0][0]
+                # Update the dictionary path in the database
+                update_data = {"dictionary_path": path}
+                sqlite_obj.updateInTable("attack_settings", 1, update_data, commit=True)
+            else:
+                # Insert the new dictionary path if no existing record
+                sqlite_obj.insertIntoTable("attack_settings", {"dictionary_path": path}, commit=True)
+            
+        except Exception as e:
+            print(f"Error saving dictionary path: {e}")
 def browse_rainbow_path(entry_widget, window):
+    global sqlite_obj
     """Open file dialog to select rainbow table path and save it to the database."""
     path = filedialog.askdirectory(title="Select Rainbow Table Folder")
     if path:
@@ -1462,21 +1574,22 @@ def browse_rainbow_path(entry_widget, window):
         conn.close()
         
 def refresh_form(parent_window, dict_path_entry, rainbow_path_entry, ui_context):
-        """Reloads the dictionary and rainbow table paths."""
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT dictionary_path, rainbow_table_path FROM attack_settings LIMIT 1")
-        row = cursor.fetchone()
-        conn.close()
+    global sqlite_obj
+    """Reloads the dictionary and rainbow table paths."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT dictionary_path, rainbow_table_path FROM attack_settings LIMIT 1")
+    row = cursor.fetchone()
+    conn.close()
 
-        # Refresh the path values
-        dict_path_entry.delete(0, tk.END)
-        rainbow_path_entry.delete(0, tk.END)
-        dict_path_entry.insert(0, row[0] if row else "")
-        rainbow_path_entry.insert(0, row[1] if row else "")
-        update_password_strength(ui_context)
-        parent_window.lift()
-        parent_window.focus()
+    # Refresh the path values
+    dict_path_entry.delete(0, tk.END)
+    rainbow_path_entry.delete(0, tk.END)
+    dict_path_entry.insert(0, row[0] if row else "")
+    rainbow_path_entry.insert(0, row[1] if row else "")
+    update_password_strength(ui_context)
+    parent_window.lift()
+    parent_window.focus()
 
 def update_password_strength(context):
     """Update password strength indicator and crack time estimates using UI context."""
@@ -1504,22 +1617,44 @@ def update_password_strength(context):
     )
 
 def open_attack_window(parent_window, current_password, aes_bit):
+    global sqlite_obj
     if hasattr(open_attack_window, "attack_win") and \
     open_attack_window.attack_win.winfo_exists():
         open_attack_window.attack_win.lift()
         open_attack_window.attack_win.focus()
         return
 
-    # Get paths from database
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT dictionary_path, rainbow_table_path, guess_per_sec, thread_count, guess_per_sec_threshold FROM attack_settings LIMIT 1')
-    db_paths = cursor.fetchone()
-    dict_path = db_paths[0] if db_paths else ""
-    rainbow_path = db_paths[1] if db_paths else ""
-    guess_per_sec = db_paths[2] if db_paths else 3000000  # Default value if not in DB
-    thread_count = db_paths[3] if db_paths else 1
-    guess_per_sec_threshold = db_paths[4] if db_paths else 10000000
+    # Get attack settings from database
+    try:
+        # Fetch the settings from the database using
+        result = sqlite_obj.getDataFromTable(
+            "attack_settings", 
+            raiseConversionError=True,
+            omitID=True
+        )
+
+        if result[1]:
+            # Extract the settings values from the result
+            dict_path = result[1][0][0]
+            rainbow_path = result[1][0][1]
+            guess_per_sec = result[1][0][2]
+            thread_count  = result[1][0][3] 
+            guess_per_sec_threshold = result[1][0][4] 
+        else:
+            print("No attack settings found in the database. Using defaults.")
+            dict_path = "./Dictionary"  # Default dictionary path
+            rainbow_path = "./Rainbow_Table"  # Default rainbow table path
+            guess_per_sec = 3000000  # Default guess rate
+            thread_count = 1  # Default thread count
+            guess_per_sec_threshold = 10000000  # Default threshold
+                    
+    except Exception as e:
+        print(f"Error fetching attack settings: {e}")
+        dict_path = "./Dictionary"  # Default dictionary path
+        rainbow_path = "./Rainbow_Table"  # Default rainbow table path
+        guess_per_sec = 3000000  # Default guess rate
+        thread_count = 1  # Default thread count
+        guess_per_sec_threshold = 10000000  # Default threshold
 
     attack_win = tk.Toplevel(parent_window)
     attack_win.title("Password Strength Tester")
@@ -3022,7 +3157,7 @@ def show_home_content1():
 
 # Function to show context menu for home items
 def show_item_context_menu(event, item_id, root):
-    global selected_item_id
+    global selected_item_id, sqlite_obj
     selected_item_id = item_id
     
     # Find the item frame to select
@@ -3032,22 +3167,35 @@ def show_item_context_menu(event, item_id, root):
             break
     
     # Check if item is in trash
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT isDeleted FROM passwords WHERE id = ?", (item_id,))
-    is_deleted = cursor.fetchone()[0]
-    conn.close()
-    
+    try:
+        # Fetch the 'isDeleted' status from the 'passwords' table using sqlite_obj
+        result = sqlite_obj.getDataFromTable(
+            "passwords", 
+            raiseConversionError=True,
+            omitID=False
+        )
+        
+        if result[1]:
+            for row in result[1]:
+                if row[0] == item_id:
+                    # Retrieve the 'isDeleted' value from the result
+                    is_deleted = result[1][0][12]  # Assuming 'isDeleted' is in the first column
+        else:
+            is_deleted = False  # Default to False if no result found
+    except Exception as e:
+        print(f"Error fetching item status: {e}")
+        is_deleted = False  # Default to False if there's an error
+
     # Create context menu based on trash status
     context_menu = Menu(root, tearoff=0)
     
     # Always include copy commands
-    context_menu.add_command(label="Copy Platform", command=lambda: copy_item_value('platform'))
-    context_menu.add_command(label="Copy Label", command=lambda: copy_item_value('label'))
-    context_menu.add_command(label="Copy Username", command=lambda: copy_item_value('username'))
-    context_menu.add_command(label="Copy Password", command=lambda: copy_item_value('password'))
-    context_menu.add_command(label="Copy URL", command=lambda: copy_item_value('url'))
-    context_menu.add_command(label="Copy Notes", command=lambda: copy_item_value('notes'))
+    context_menu.add_command(label="Copy Platform", command=lambda: copy_item_value('platform', root))
+    context_menu.add_command(label="Copy Label", command=lambda: copy_item_value('label', root))
+    context_menu.add_command(label="Copy Username", command=lambda: copy_item_value('username', root))
+    context_menu.add_command(label="Copy Password", command=lambda: copy_item_value('password', root))
+    context_menu.add_command(label="Copy URL", command=lambda: copy_item_value('url', root))
+    context_menu.add_command(label="Copy Notes", command=lambda: copy_item_value('notes', root))
     context_menu.add_separator()
     
     if is_deleted:
@@ -3061,32 +3209,26 @@ def show_item_context_menu(event, item_id, root):
     context_menu.post(event.x_root, event.y_root)
 
 def restore_selected_home_entry(root):
-    global selected_item_id
+    global selected_item_id, sqlite_obj
     if not selected_item_id:
         messagebox.showinfo("Info", "No item selected")
         return
-
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
+    
+    # Restore entry
     try:
-        cursor.execute('''
-            UPDATE passwords 
-            SET isDeleted = 0, deletedAt = NULL
-            WHERE id = ?
-        ''', (selected_item_id,))
-        conn.commit()
+        # Perform the update using sqlite_obj
+        sqlite_obj.updateInTable("passwords", selected_item_id , "isDeleted" , 0 , commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", selected_item_id , "deletedAt" , None , commit = True , raiseError = True)
         messagebox.showinfo("Success", "Entry restored")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to restore entry: {e}")
-    finally:
-        conn.close()
-    
+
     # Refresh the view
     selected_item_id = None
     show_home_content(root)
 
 def delete_permanently_selected_home_entry(root):
-    global selected_item_id
+    global selected_item_id, sqlite_obj
     if not selected_item_id:
         messagebox.showinfo("Info", "No item selected")
         return
@@ -3099,60 +3241,71 @@ def delete_permanently_selected_home_entry(root):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     try:
-        cursor.execute("DELETE FROM passwords WHERE id = ?", (selected_item_id,))
-        conn.commit()
+        sqlite_obj.deleteDataInTable("passwords", selected_item_id , commit = True , raiseError = True , updateId = True)
         messagebox.showinfo("Success", "Entry permanently deleted")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to delete entry: {e}")
-    finally:
-        conn.close()
-    
+
     # Refresh the view
     selected_item_id = None
     show_home_content(root)
 
-# Function to copy item values
-def copy_item_value(field):
-    global selected_item_id
+# Function to copy item values using sqlite_obj
+def copy_item_value(field, root):
+    global selected_item_id, sqlite_obj
     if not selected_item_id:
         messagebox.showinfo("Info", "No item selected")
         return
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT platformName, platformLabel, platformUser, encryptedPassword, 
-               platformURL, platformNote, aes_bits 
-        FROM passwords WHERE id = ?
-    ''', (selected_item_id,))
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row:
-        messagebox.showerror("Error", "Item not found")
-        return
-
-    platform, label, username, encrypted_pw, url, notes, aes_bits = row
-
     try:
-        if field == 'password':
-            value = decrypt_things(encrypted_pw, key, aes_bits)
-        elif field == 'platform':
-            value = platform
-        elif field == 'label':
-            value = label
-        elif field == 'username':
-            value = username
-        elif field == 'url':
-            value = url
-        elif field == 'notes':
-            value = notes
+        # Fetch the item details from the database using sqlite_obj
+        result = sqlite_obj.getDataFromTable(
+            "passwords", 
+            raiseConversionError=True,
+            omitID=False
+        )
+
+        if result[1]:
+            for row in result[1]:
+                if row[0] == selected_item_id:
+                    # Retrieve the item details
+                    detail = row
+                    break
+            # Extract the values from the detail
+            platform = detail[1]
+            label = detail[2]
+            username = detail[3]
+            encrypted_pw = detail[4]
+            url = detail[5]
+            notes = detail[6]
+            aes_bits = detail[9]
         else:
-            value = ""
+            messagebox.showerror("Error", "Item not found")
+            return
+
+        # Process the field and copy the value
+        try:
+            if field == 'password':
+                value = decrypt_things(encrypted_pw, key, aes_bits)
+            elif field == 'platform':
+                value = platform
+            elif field == 'label':
+                value = label
+            elif field == 'username':
+                value = username
+            elif field == 'url':
+                value = url
+            elif field == 'notes':
+                value = notes
+            else:
+                value = ""
             
-        copy_value(value)
+            copy_value(value, root)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to get value: {e}")
+    
     except Exception as e:
-        messagebox.showerror("Error", f"Failed to get value: {e}")
+        messagebox.showerror("Error", f"Database error: {str(e)}")
 
 # Function to check if clipboard history is enabled
 def is_clipboard_history_enabled():
@@ -3258,27 +3411,21 @@ def countdown(seconds, clipboard_history_enabled, root):
 
 # Delete entry for home content
 def delete_selected_home_entry(root):
-    global selected_item_id
+    global selected_item_id, sqlite_obj
     if not selected_item_id:
         messagebox.showinfo("Info", "No item selected")
         return
     
-    # Now soft-delete the entry
+    # Now soft-delete the entry using sqlite_obj
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        cursor.execute('''
-            UPDATE passwords 
-            SET isDeleted = 1, deletedAt = datetime('now')
-            WHERE id = ?
-        ''', (selected_item_id,))
-        conn.commit()
+        # Perform the update
+        sqlite_obj.updateInTable("passwords", selected_item_id , "isDeleted" , 1 , commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", selected_item_id , "deletedAt" , current_time , commit = True , raiseError = True)
         messagebox.showinfo("Success", "Entry moved to trash")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to delete entry: {e}")
-    finally:
-        conn.close()
     
     # Refresh the view
     selected_item_id = None
@@ -3314,7 +3461,8 @@ unsaved_changes = False
 # Global variable declaration
 item_context_menu = None
 
-def show_home_content(root):   
+def show_home_content(root):
+    global sqlite_obj   
     global unsaved_changes, timer_label, selected_item_frame, selected_item_widget, items_container, details_placeholder, main_frame
     global selected_item_id  # Add this
     selected_item_id = None  # Reset selected item ID
@@ -3409,19 +3557,19 @@ def show_home_content(root):
     clear_button.pack_forget()  # Hide the clear button initially
 
     # Define the search function
-    def search_function(event=None):
+    def search_function(event=None):    
         search_query = search_entry.get().strip().lower()
-
-        # Show or hide the clear button based on whether there is input
+        
+        # Show/hide clear button
         if search_query:
-            clear_button.pack(side=tk.RIGHT, padx=5)  # Show clear button
+            clear_button.pack(side=tk.RIGHT, padx=5)
         else:
-            clear_button.pack_forget()  # Hide clear button
-
-        # Clear current items and selection
+            clear_button.pack_forget()
+        
+        # Clear UI elements
         for widget in items_container.winfo_children():
             widget.destroy()
-
+        
         selected_item_widget = None
         selected_item_id = None
         for child in details_frame.winfo_children():
@@ -3429,43 +3577,55 @@ def show_home_content(root):
                 child.destroy()
         for widget in selected_item_frame.winfo_children():
             widget.destroy()
-
+        
         details_placeholder = tk.Label(selected_item_frame,
-                                       text="No item selected. Select an item to view details.",
-                                       bg="#ffffff", fg="#666666",
-                                       font=("Arial", 10), wraplength=400)
+                                    text="No item selected. Select an item to view details.",
+                                    bg="#ffffff", fg="#666666",
+                                    font=("Arial", 10), wraplength=400)
         details_placeholder.pack(expand=True, fill=tk.BOTH, padx=40, pady=40)
-
+        
+        # Fetch all items using sqlite_obj
         try:
-            with sqlite3.connect(DB_FILE) as conn:
-                cursor = conn.cursor()
-                query = """
-                    SELECT id, platformName, platformUser, updatedAt, platformLabel 
-                    FROM passwords 
-                    WHERE isDeleted = 0
-                    AND (LOWER(platformName) LIKE ? 
-                    OR LOWER(platformLabel) LIKE ? 
-                    OR LOWER(platformUser) LIKE ? 
-                    OR LOWER(updatedAt) LIKE ?)
-                    ORDER BY platformName
-                """
-                pattern = f"%{search_query}%"
-                cursor.execute(query, (pattern, pattern, pattern, pattern))
-                passwords = cursor.fetchall()
-
-                if passwords:
-                    for pwd in passwords:
-                        create_item_widget(*pwd)
-                else:
-                    placeholder = tk.Label(
-                        items_container,
-                        text="No matching items found.",
-                        bg="#ffffff", fg="#666666",
-                        font=("Arial", 10), wraplength=200
-                    )
-                    placeholder.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        except sqlite3.Error as e:
+            result = sqlite_obj.getDataFromTable(
+                "passwords", 
+                raiseConversionError=True, 
+                omitID=False
+            )
+            
+            passwords = []
+            if result[1]:
+                for row in result[1]:
+                    # Extract columns: 
+                    item_id = row[0]
+                    platform_name = row[1]
+                    platform_label = row[2]
+                    platform_user = row[3]
+                    updated_at = row[8]
+                    
+                    # Check if search query matches any field
+                    if (search_query in platform_name.lower() or
+                        search_query in platform_label.lower() or
+                        search_query in platform_user.lower() or
+                        search_query in updated_at.lower()):
+                        passwords.append((item_id, platform_name, platform_user, updated_at, platform_label))
+            
+            # Sort by platform name
+            passwords.sort(key=lambda x: x[1].lower())
+            
+            # Display results
+            if passwords:
+                for pwd in passwords:
+                    create_item_widget(*pwd)
+            else:
+                placeholder = tk.Label(
+                    items_container,
+                    text="No matching items found.",
+                    bg="#ffffff", fg="#666666",
+                    font=("Arial", 10), wraplength=200
+                )
+                placeholder.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+                
+        except Exception as e:
             print(f"Database error during search: {e}")
             messagebox.showerror("Search Error", "Failed to perform search")
 
@@ -3537,32 +3697,56 @@ def show_home_content(root):
                                     bg="#ffffff", fg="#666666", font=("Arial", 10), wraplength=400)
         details_placeholder.pack(expand=True, fill=tk.BOTH, padx=40, pady=40)
         
-        # Fetch filtered items from database
+        # Fetch filtered items from database using sqlite_obj
         try:
-            with sqlite3.connect(DB_FILE) as conn:
-                cursor = conn.cursor()
-                query = "SELECT id, platformName, platformUser, updatedAt, platformLabel FROM passwords WHERE isDeleted = 0"
-                params = []
-                
-                if filter_type == "favorites":
-                    query += " AND isFavourite = 1"
-                elif filter_type == "type":
-                    query += " AND platformLabel = ?"
-                    params.append(filter_value)
-                elif filter_type == "trash":
-                    query = "SELECT id, platformName, platformUser, updatedAt, platformLabel FROM passwords WHERE isDeleted = 1"
-                
-                query += " ORDER BY platformName"
-                cursor.execute(query, params)
-                passwords = cursor.fetchall()
-        except sqlite3.Error as e:
-            print(f"Database error: {e}")
+            # Get all password entries (ID is first column due to makeSecure=True)
+            result = sqlite_obj.getDataFromTable(
+                "passwords", 
+                raiseConversionError=True, 
+                omitID=False
+            )
+
+            if not result[1]:  # No data found
+                passwords = []
+            else:
+                # Filter passwords based on criteria
+                passwords = []
+                for row in result[1]:
+                    print(result[1])
+                    print(row)
+                    # Extract columns from row
+                    item_id = row[0]
+                    platform_name = row[1]
+                    platform_label = row[2]
+                    platform_user = row[3]
+                    updated_at = row[8]
+                    is_favorite = row[11]
+                    is_deleted = row[12]
+                    
+                    # Apply filters
+                    if filter_type == "favorites" and not is_favorite:
+                        continue
+                    elif filter_type == "type" and platform_label != filter_value:
+                        continue
+                    elif filter_type == "trash" and not is_deleted:
+                        continue
+                    elif filter_type != "trash" and is_deleted:
+                        continue
+                    
+                    # Add to results
+                    passwords.append((item_id, platform_name, platform_user, updated_at, platform_label))
+            
+            # Sort by platform name
+            passwords.sort(key=lambda x: x[1].lower())
+            
+        except Exception as e:
+            print(f"Database error during filter: {e}")
             passwords = []
         
         # Display placeholder if no items
         if not passwords:
             placeholder = tk.Label(items_container, text="No items found. Click the '+' button to add a new item.",
-                                  bg="#ffffff", fg="#666666", font=("Arial", 10), wraplength=200)
+                                bg="#ffffff", fg="#666666", font=("Arial", 10), wraplength=200)
             placeholder.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         else:
             # Display filtered items
@@ -3716,7 +3900,7 @@ def create_bottom_frame(parent, root, password_id, is_deleted, is_edit_mode, sav
     return bottom_frame
 
 def show_password_details(root, password_id=None):
-    global unsaved_changes, selected_item_frame, details_frame
+    global unsaved_changes, selected_item_frame, details_frame, sqlite_obj
     
     # Check for unsaved changes if switching items
     if unsaved_changes and not confirm_discard_changes():
@@ -3743,57 +3927,48 @@ def show_password_details(root, password_id=None):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
-    # Fetch the password details from the database
+    # Fetch the password details from the database using sqlite_obj
     if is_edit_mode:
-        cursor.execute(''' 
-            SELECT platformName, platformLabel, platformUser, encryptedPassword, 
-                platformURL, platformNote, createdAt, updatedAt, aes_bits, 
-                mp_reprompt, isFavourite, IsDeleted, deletedAt
-            FROM passwords WHERE id = ? 
-        ''', (password_id,))
-        row = cursor.fetchone()
+        try:
+            # Get all password entries (ID is first column due to makeSecure=True)
+            result = sqlite_obj.getDataFromTable(
+                "passwords", 
+                raiseConversionError=True, 
+                omitID=False
+            )
+            
+            if not result[1]:  # No data found
+                row = [None] * 13
+                decrypted_password = ''
+            else:
+                row = []
+                # Find the row that matches the password_id
+                for entry in result[1]:
+                    if entry[0] == password_id:  # Matching the password_id (assumed that entry[0] is the actual ID)
+                        row = entry
+                        break
+                
+                if row:
+                    # Check if master password is required
+                    if row[9]:  # mp_reprompt is True
+                        if not require_master_password():  # If user cancels or enters wrong password
+                            return  # Cancel the operation
 
-        if row:
-            # Check if master password is required
-            if row[9]:  # mp_reprompt is True
-                if not require_master_password():  # If user cancels or enters wrong password
-                    conn.close()
-                    return  # Cancel the operation
-
-            # Decrypt password
-            try:
-                decrypted_password = decrypt_things(row[3], key, row[8])
-            except:
-                decrypted_password = "Error decrypting"
-        else:
+                    # Decrypt password
+                    try:
+                        decrypted_password = decrypt_things(row[3], key, row[8])
+                    except Exception as e:
+                        decrypted_password = "Error decrypting"
+                else:
+                    row = [None] * 13
+                    decrypted_password = ''
+        except Exception as e:
+            print(f"Error fetching password details: {e}")
             row = [None] * 13
             decrypted_password = ''
     else:
         row = [None] * 13
         decrypted_password = ''
-
-    # Fetch attack settings from database
-    cursor.execute('''
-        SELECT dictionary_path, rainbow_table_path, guess_per_sec, thread_count, guess_per_sec_threshold 
-        FROM attack_settings 
-        LIMIT 1
-    ''')
-    attack_row = cursor.fetchone()
-
-    if attack_row:
-        dictionary_path = attack_row[0]
-        rainbow_path = attack_row[1]
-        guess_per_sec = attack_row[2]
-        thread_count_val = attack_row[3]
-        threshold_val = attack_row[4]
-    else:
-        dictionary_path = ""
-        rainbow_path = ""
-        guess_per_sec = 3000000
-        thread_count_val = 1
-        threshold_val = 10000000
-
-    conn.close()
 
     # Create StringVars for password and confirm password fields
     pass_var = tk.StringVar(value=decrypted_password)
@@ -4390,6 +4565,7 @@ def confirm_discard_changes():
     )
 
 def save_new_password(name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite):
+    global sqlite_obj
     # Validation logic
     if not name or not label or not user or not password or not confirm_password:
         messagebox.showerror("Error", "Please fill in all required fields")
@@ -4404,27 +4580,36 @@ def save_new_password(name, label, user, password, confirm_password, url, notes,
     encrypted_password = encrypt_things(password, key, aes_bits)
     
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
+    
     # Database insertion
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute('''INSERT INTO passwords (
-            platformName, platformLabel, platformUser, encryptedPassword,
-            platformURL, platformNote, createdAt, updatedAt, aes_bits,
-            mp_reprompt, isFavourite
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (name, label, user, encrypted_password, url, notes, current_time, current_time, aes_bits, mp_reprompt, is_favourite))
-        conn.commit()
+        # Prepare the data to be inserted
+        insert_data = [
+            name,
+            label,
+            user,
+            encrypted_password,
+            url,
+            notes,
+            current_time,
+            current_time,
+            aes_bits,
+            mp_reprompt,
+            is_favourite,
+            'False', 
+            ''
+        ]
+        
+        # Perform the insertion using sqlite_obj
+        sqlite_obj.insertIntoTable("passwords", insert_data, commit=True)
         messagebox.showinfo("Success", "Password saved successfully")
         return True  # Return success to trigger show_home_content
     except Exception as e:
         messagebox.showerror("Database Error", f"Error saving password: {str(e)}")
         return False  # Return failure, prevent further actions
-    finally:
-        conn.close()
 
 def save_password_changes(password_id, name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite):
+    global sqlite_obj
     # Validation logic
     if not name or not label or not user or not password or not confirm_password:
         messagebox.showerror("Error", "Please fill in all required fields")
@@ -4440,25 +4625,24 @@ def save_password_changes(password_id, name, label, user, password, confirm_pass
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute(""" 
-            UPDATE passwords 
-            SET platformName = ?, platformLabel = ?, platformUser = ?, encryptedPassword = ?,
-                platformURL = ?, platformNote = ?, updatedAt = ?, aes_bits = ?, 
-                mp_reprompt = ?, isFavourite = ? 
-            WHERE id = ? 
-        """, (name, label, user, encrypted_password, url, notes, current_time, aes_bits, mp_reprompt, is_favourite, password_id))
-        conn.commit()
+        sqlite_obj.updateInTable("passwords", password_id , "platformName" , name, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , "platformLabel" , label, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , "platformUser" , user, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , "encryptedPassword" , encrypted_password, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , "platformURL" , url, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , "platformNote" , notes, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , "updatedAt" , current_time, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , "aes_bits" , aes_bits, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , " mp_reprompt" , mp_reprompt, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , " isFavourite" , is_favourite, commit = True , raiseError = True)
         messagebox.showinfo("Success", "Password updated successfully")
         return True  # Return success to trigger show_home_content
     except Exception as e:
         messagebox.showerror("Error", f"Failed to save changes: {str(e)}")
         return False  # Return failure, prevent further actions
-    finally:
-        conn.close()
 
 def open_aes_evaluation_window(parent_window, current_password, aes_bit_var):
+    global sqlite_obj
     eval_win = tk.Toplevel(parent_window)
     eval_win.title("AES Bit Evaluation")
     eval_win.configure(bg="#f0f0f0")
@@ -4503,16 +4687,25 @@ def open_aes_evaluation_window(parent_window, current_password, aes_bit_var):
     password_eye_icon.bind("<Leave>", lambda e: hide_tooltip())
 
     # Get current values for guess_per_sec, thread_count, and guess_per_sec_threshold from the database
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('''SELECT guess_per_sec, thread_count, guess_per_sec_threshold FROM attack_settings LIMIT 1''')
-    settings = cursor.fetchone()
-    conn.close()
+    try:
+        # Fetch attack settings from the database
+        result = sqlite_obj.getDataFromTable(
+            "attack_settings", 
+            raiseConversionError=True,
+            omitID=True
+        )
 
-    # Set default values if no settings found
-    guess_per_sec = settings[1] if settings else 3000000
-    thread_count = settings[2] if settings else 1
-    guess_per_sec_threshold = settings[3] if settings else 10000000
+        if result[1]:
+            # Set values if data is found
+            guess_per_sec = result[1][0][2]  # First row, first column: guess_per_sec
+        else:
+            # Set default values if no settings found
+            guess_per_sec = 3000000
+
+    except Exception as e:
+        print(f"Error fetching attack settings: {e}")
+        # Set default values in case of an error
+        guess_per_sec = 3000000
 
     # Guess Rate
     tk.Label(main_frame, text="Guess Rate (per sec):", bg="#f0f0f0").grid(row=1, column=0, padx=5, pady=5, sticky="w")
