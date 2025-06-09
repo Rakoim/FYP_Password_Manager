@@ -162,22 +162,6 @@ def on_closing(root):
         root.destroy()
         exit()
 
-# Function to retrieve the salt from the hashed_password in the database
-def get_salt_from_database():
-    """Retrieve the salt from the hashed_password stored in the database."""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT hashed_password FROM master_password")
-    result = cursor.fetchone()
-    conn.close()
-
-    if not result:
-        return None  # No master password set
-
-    stored_hashed_password = base64.b64decode(result[0])
-    salt = stored_hashed_password[:16]  # Extract the salt
-    return salt
-
 # Function to derive key from master password using PBKDF2
 def derive_key(master_password, salt):
     """Generate a 256-bit key from the master password using PBKDF2."""
@@ -208,8 +192,8 @@ def store_master_password(master_password):
     if result[1]:  # If there are rows in the table
         # Delete each row by ID
         for row in result[1]:  # result[1] contains the actual data
-            id_value = row[0]
-            sqlite_obj.deleteDataInTable("master_password", id_value, commit=False, updateId=True)
+            id_value = int(row[0])
+            sqlite_obj.deleteDataInTable("master_password", id_value, commit=True, updateId=True)
     
     # Insert the new master password
     sqlite_obj.insertIntoTable("master_password", [hashed_password], commit=True)
@@ -253,15 +237,14 @@ def get_recovery_keys():
         result = sqlite_obj.getDataFromTable(
             "recovery_keys", 
             raiseConversionError=True,
-            omitID=True
+            omitID=False
         )
         
         # Extract the hashed recovery keys from the result
         if result[1]:
-            hashed_recovery_keys = [row[0] for row in result[1]]
+            hashed_recovery_keys = [row[1] for row in result[1]]
         else:
             hashed_recovery_keys = []
-
         return hashed_recovery_keys
 
     except Exception as e:
@@ -373,10 +356,44 @@ def setup_database():
 
     # Recovery keys table
     col_list = [
-        # ["id", "INT PRIMARY KEY"],
         ["hashed_key", "TEXT"]
     ]
     sqlite_obj.createTable("recovery_keys", col_list, makeSecure=True, commit=True)
+
+    # Insert default keys if empty
+    result = sqlite_obj.getDataFromTable("recovery_keys", raiseConversionError=False, omitID=False)
+    
+    if not result[1]:  # If there are no rows in the table
+        sqlite_obj.insertIntoTable("recovery_keys", [""],
+            commit=True
+        )
+        sqlite_obj.insertIntoTable("recovery_keys", [""],
+            commit=True
+        )    
+        sqlite_obj.insertIntoTable("recovery_keys", [""],
+            commit=True
+        )        
+        sqlite_obj.insertIntoTable("recovery_keys", [""],
+            commit=True
+        )        
+        sqlite_obj.insertIntoTable("recovery_keys", [""],
+            commit=True
+        )        
+        sqlite_obj.insertIntoTable("recovery_keys", [""],
+            commit=True
+        )        
+        sqlite_obj.insertIntoTable("recovery_keys", [""],
+            commit=True
+        )        
+        sqlite_obj.insertIntoTable("recovery_keys", [""],
+            commit=True
+        )       
+        sqlite_obj.insertIntoTable("recovery_keys", [""],
+            commit=True
+        )        
+        sqlite_obj.insertIntoTable("recovery_keys", [""],
+            commit=True
+        )
 
     # Passwords table
     col_list = [
@@ -1514,40 +1531,25 @@ def browse_dictionary_path(entry_widget, window):
         window.lift()
 
         # Save to database
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute('''SELECT dictionary_path FROM attack_settings LIMIT 1''')
-        existing_path = cursor.fetchone()
-
-        if existing_path:
-            # Update the dictionary path in the database if it exists
-            cursor.execute('''UPDATE attack_settings SET dictionary_path = ? WHERE dictionary_path = ?''', (path, existing_path[0]))
-        else:
-            # Insert the new dictionary path if no existing record
-            cursor.execute('''INSERT INTO attack_settings (dictionary_path) VALUES (?)''', (path,))
-
-        conn.commit()
-        conn.close()
-
         try:
-            # Fetch the existing dictionary path from the database
             result = sqlite_obj.getDataFromTable(
                 "attack_settings", 
                 raiseConversionError=True,
-                omitID=True
+                omitID=False
             )
             
             if result[1]:
-                existing_path = result[1][0][0]
+                id = result[1][0][0] 
+                
                 # Update the dictionary path in the database
-                update_data = {"dictionary_path": path}
-                sqlite_obj.updateInTable("attack_settings", 1, update_data, commit=True)
+                sqlite_obj.updateInTable("attack_settings" , id , "dictionary_path" , path , commit = True , raiseError = True)
+
             else:
-                # Insert the new dictionary path if no existing record
-                sqlite_obj.insertIntoTable("attack_settings", {"dictionary_path": path}, commit=True)
+                print("No dictionary path found in the database.")
             
         except Exception as e:
             print(f"Error saving dictionary path: {e}")
+
 def browse_rainbow_path(entry_widget, window):
     global sqlite_obj
     """Open file dialog to select rainbow table path and save it to the database."""
@@ -1556,40 +1558,55 @@ def browse_rainbow_path(entry_widget, window):
         entry_widget.delete(0, tk.END)
         entry_widget.insert(0, path)
         window.lift()
-
-        # Save to database
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute('''SELECT rainbow_table_path FROM attack_settings LIMIT 1''')
-        existing_path = cursor.fetchone()
-
-        if existing_path:
-            # Update the rainbow table path in the database if it exists
-            cursor.execute('''UPDATE attack_settings SET rainbow_table_path = ? WHERE rainbow_table_path = ?''', (path, existing_path[0]))
-        else:
-            # Insert the new rainbow table path if no existing record
-            cursor.execute('''INSERT INTO attack_settings (rainbow_table_path) VALUES (?)''', (path,))
-
-        conn.commit()
-        conn.close()
         
+        # Save to database
+        try:
+            result = sqlite_obj.getDataFromTable(
+                "attack_settings", 
+                raiseConversionError=True,
+                omitID=False
+            )
+            
+            if result[1]:
+                id = result[1][0][0] 
+                
+                # Update the dictionary path in the database
+                sqlite_obj.updateInTable("attack_settings" , id , "rainbow_table_path" , path , commit = True , raiseError = True)
+
+            else:
+                print("No rainbow table path found in the database.")
+            
+        except Exception as e:
+            print(f"Error saving dictionary path: {e}")
+
 def refresh_form(parent_window, dict_path_entry, rainbow_path_entry, ui_context):
     global sqlite_obj
     """Reloads the dictionary and rainbow table paths."""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT dictionary_path, rainbow_table_path FROM attack_settings LIMIT 1")
-    row = cursor.fetchone()
-    conn.close()
-
-    # Refresh the path values
-    dict_path_entry.delete(0, tk.END)
-    rainbow_path_entry.delete(0, tk.END)
-    dict_path_entry.insert(0, row[0] if row else "")
-    rainbow_path_entry.insert(0, row[1] if row else "")
-    update_password_strength(ui_context)
-    parent_window.lift()
-    parent_window.focus()
+    try:
+        # Fetch the dictionary and rainbow table paths from the database
+        result = sqlite_obj.getDataFromTable(
+            "attack_settings", 
+            raiseConversionError=True,
+            omitID=True
+        )
+        
+        # Refresh the path values
+        dict_path_entry.delete(0, tk.END)
+        rainbow_path_entry.delete(0, tk.END)
+        
+        if result[1]:
+            dict_path_entry.insert(0, result[1][0][0])  # First column: dictionary_path
+            rainbow_path_entry.insert(0, result[1][0][1])  # Second column: rainbow_table_path
+        else:
+            dict_path_entry.insert(0, "")  # Default empty if no result
+            rainbow_path_entry.insert(0, "")  # Default empty if no result
+        
+        update_password_strength(ui_context)
+        parent_window.lift()
+        parent_window.focus()
+    
+    except Exception as e:
+        print(f"Error fetching paths for refresh: {e}")
 
 def update_password_strength(context):
     """Update password strength indicator and crack time estimates using UI context."""
@@ -2798,363 +2815,6 @@ def open_add_password_form1():
 
     update_password_strength(ui_context)
 
-def edit_selected_entry():
-    selected_item = tree.selection()
-    if not selected_item:
-        messagebox.showwarning("Selection Error", "Please select an entry to edit.")
-        return
-
-    item = tree.item(selected_item[0])
-    values = item["values"]
-
-    # Create a Toplevel window (pop-up)
-    edit_password_window = tk.Toplevel(root)
-    edit_password_window.title("Edit Entry")
-    window_width = 550
-    window_height = 700
-
-    # Center the window on the screen
-    screen_width = edit_password_window.winfo_screenwidth()
-    screen_height = edit_password_window.winfo_screenheight()
-    x = (screen_width - window_width) // 2
-    y = (screen_height - window_height) // 2
-    edit_password_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
-
-    # Set the theme to match the initial setup
-    edit_password_window.configure(bg="#f0f0f0")
-
-    # Define padding
-    label_padx = 20
-    entry_padx = 10
-    pady = 10
-
-    # Create a Frame for form fields (ensures alignment)
-    form_frame = tk.Frame(edit_password_window, bg="#f0f0f0")
-    form_frame.pack(pady=20)
-
-    # Platform Name
-    tk.Label(form_frame, text="Platform Name:", anchor="w").grid(row=0, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_platform_name = tk.Entry(form_frame, width=30)
-    entry_platform_name.insert(0, values[1])
-    entry_platform_name.grid(row=0, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Label (Category)
-    tk.Label(form_frame, text="Label:", anchor="w").grid(row=1, column=0, padx=label_padx, pady=pady, sticky="w")
-    label_options = ["Banking", "Browser", "Cloud Services", "Development", "Education", "Email", "Entertainment", 
-                    "Finance", "Forums", "Gaming", "Government", "Health", "News", "Personal", "Shopping", 
-                    "Social Media", "Sports", "Streaming", "Travel", "Utilities", "Work", "Others"]
-    platform_label = ttk.Combobox(form_frame, values=label_options, width=27)
-    platform_label.set(values[2])
-    platform_label.grid(row=1, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Username
-    tk.Label(form_frame, text="Username:", anchor="w").grid(row=2, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_username = tk.Entry(form_frame, width=30)
-    entry_username.insert(0, values[3])
-    entry_username.grid(row=2, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Password Field
-    tk.Label(form_frame, text="Password:", bg="#f0f0f0", anchor="w").grid(row=3, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_password = tk.Entry(form_frame, show="*", width=30)
-    entry_password.insert(0, values[9])
-    entry_password.grid(row=3, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Confirm Password
-    tk.Label(form_frame, text="Confirm Password:", anchor="w").grid(row=4, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_confirm_password = tk.Entry(form_frame, show="*", width=30)
-    entry_confirm_password.insert(0, values[9])
-    entry_confirm_password.grid(row=4, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Show/Hide password icon
-    def toggle_password_visibility():
-        if entry_password.cget('show') == '*':
-            entry_password.config(show='')
-            entry_confirm_password.config(show='')
-            eye_icon.config(image=show_password)
-        else:
-            entry_password.config(show='*')
-            entry_confirm_password.config(show='*')
-            eye_icon.config(image=hide_password)
-
-    # Load images for Show/Hide password
-    show_password = tk.PhotoImage(file="Images/show_password_b.png").subsample(3, 3)
-    hide_password = tk.PhotoImage(file="Images/hide_password_b.png").subsample(3, 3)
-
-    # Show/Hide Password Button
-    eye_icon = tk.Label(form_frame, image=hide_password, cursor="hand2", bg="#f0f0f0")
-    eye_icon.grid(row=3, column=2, padx=5, sticky="w")
-    eye_icon.bind("<Button-1>", lambda e: toggle_password_visibility())
-
-    # AES Bit Selection
-    tk.Label(form_frame, text="AES Bit:", anchor="w").grid(row=5, column=0, padx=label_padx, pady=pady, sticky="w")
-    aes_bit_options = ["128", "192", "256"]
-    aes_bit_combobox = ttk.Combobox(form_frame, values=aes_bit_options, width=27)
-    aes_bit_combobox.grid(row=5, column=1, padx=entry_padx, pady=pady, sticky="w")
-    aes_bit_combobox.set(256)  # Default to 256-bit
-    selected_aes_bit = tk.IntVar(value=256)
-
-    # Password Strength Indicator
-    password_strength_label = tk.Label(form_frame, text="Strength: Weak", fg="red", anchor="w")
-    password_strength_label.grid(row=6, column=1, padx=entry_padx, pady=5, sticky="w")
-
-    # Attack Method ComboBox
-    tk.Label(form_frame, text="Attack Method:", anchor="w").grid(row=7, column=0, padx=label_padx, pady=pady, sticky="w")
-    attack_method_options = ["Brute Force", "Dictionary Attack", "Rainbow Table"]
-    attack_method_var = tk.StringVar(value="Brute Force")
-    attack_method_combobox = ttk.Combobox(form_frame, values=attack_method_options, width=27, textvariable=attack_method_var)
-    attack_method_combobox.grid(row=7, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    def update_password_strength(event):
-        password = entry_password.get()
-        strength = check_password_strength(password)
-
-        color_map = {
-            "Weak": "red",
-            "Medium": "orange",
-            "Strong": "green"
-        }
-        strength_color = color_map.get(strength, "black")
-        password_strength_label.config(text=f"Strength: {strength}", fg=strength_color)
-
-        crack_times = estimate_crack_time(password, selected_aes_bit.get(), attack_method_var.get())
-        
-        if not hasattr(entry_password, 'crack_time_labels'):
-            entry_password.crack_time_labels = {}
-            crack_frame = tk.Frame(form_frame)
-            crack_frame.grid(row=10, column=0, columnspan=4, pady=5, sticky="w")
-            tk.Label(crack_frame, text="Estimated Time to Crack:", font=("Arial", 9, "bold")).pack(anchor="w")
-            
-            algorithms = ["AES Brute-Force", "Password Brute-Force", "Dictionary Attack", "Rainbow Table", "Breach Check"]
-            for algo in algorithms:
-                frame = tk.Frame(crack_frame)
-                frame.pack(anchor="w")
-                tk.Label(frame, text=f"{algo}:", width=16, anchor="w").pack(side=tk.LEFT)
-                label = tk.Label(frame, text="", fg="red")
-                label.pack(side=tk.LEFT)
-                entry_password.crack_time_labels[algo] = label
-        
-        for algo, time in crack_times.items():
-            label = entry_password.crack_time_labels[algo]
-            label.config(text=time)
-            if algo == "Breach Check":
-                color = "red" if "⚠️" in time or time == "No password entered" else "green"
-                label.config(fg=color)
-            elif algo == "Dictionary Attack":
-                color = "red" if time in ["Dictionary attack disabled", "No password entered", "Found in wordlist"] else "green"
-                label.config(fg=color)
-            else:
-                color = "green" if "yrs" in time else "orange" if "days" in time else "red"
-                label.config(fg=color)
-
-    def on_aes_bit_change(event):
-        selected_aes_bit.set(int(aes_bit_combobox.get()))
-        update_password_strength(None)
-
-    aes_bit_combobox.bind("<<ComboboxSelected>>", on_aes_bit_change)
-    attack_method_combobox.bind("<<ComboboxSelected>>", update_password_strength)
-    entry_password.bind("<KeyRelease>", update_password_strength)
-    update_password_strength(None)  # <-- Auto-check strength on form load
-
-    # URL
-    tk.Label(form_frame, text="URL:", anchor="w").grid(row=8, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_url = tk.Entry(form_frame, width=30)
-    entry_url.insert(0, values[5])
-    entry_url.grid(row=8, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Notes
-    tk.Label(form_frame, text="Notes:", anchor="nw").grid(row=9, column=0, padx=label_padx, pady=pady, sticky="nw")
-    entry_notes = tk.Text(form_frame, height=4, width=30)
-    entry_notes.insert("1.0", values[6])
-    entry_notes.grid(row=9, column=1, padx=entry_padx, pady=pady, sticky="w", columnspan=2)
-
-    # Generate Password Menu
-    def show_generate_menu(event):
-        generate_menu.post(event.x_root, event.y_root)
-        
-    def generate_now():
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM password_criteria ORDER BY id DESC LIMIT 1")
-        criteria = cursor.fetchone()
-        conn.close()
-
-        if not criteria:
-            messagebox.showwarning("Criteria Error", "No password generation criteria found.")
-            return
-
-        length, include_uppercase, include_lowercase, include_digits, include_minus, \
-        include_underline, include_space, include_special, include_brackets, include_latin1 = criteria[1:]
-
-        characters = ""
-        if include_uppercase: characters += string.ascii_uppercase
-        if include_lowercase: characters += string.ascii_lowercase
-        if include_digits: characters += string.digits
-        if include_minus: characters += "-"
-        if include_underline: characters += "_"
-        if include_space: characters += " "
-        if include_special: characters += "!\"#$%&'*+,-./:;=?@\\^_`|~"
-        if include_brackets: characters += "[]{}()<>"
-        if include_latin1: characters += ''.join(chr(i) for i in range(160, 256))
-
-        if not characters:
-            messagebox.showwarning("Selection Error", "Please select at least one character type.")
-            return
-
-        while True:
-            new_password = generate_password(length, characters)
-            if check_password_strength(new_password) == "Strong":
-                break
-
-        entry_password.delete(0, tk.END)
-        entry_password.insert(0, new_password)
-        update_password_strength(None)
-
-    def setup_password_generation():
-        open_password_generation_form()
-
-    # Generate Password Button
-    generate_menu = tk.Menu(root, tearoff=0)
-    generate_menu.add_command(label="Generate Now", command=generate_now)
-    generate_menu.add_command(label="Setup Password Generation", command=setup_password_generation)
-    
-    generate_button = tk.Button(form_frame, text="Generate", font=("Arial", 10, "bold"), bg="#4CAF50", fg="white", padx=5, pady=2, relief="raised")
-    generate_button.grid(row=3, column=4, padx=5, sticky="w")
-    generate_button.bind("<Button-1>", show_generate_menu)
-    generate_button.bind("<Enter>", lambda event: on_hover(event, generate_button, "#45a049", "#4CAF50"))
-    generate_button.bind("<Leave>", lambda event: on_hover(event, generate_button, "#45a049", "#4CAF50"))
-
-    # OK & Cancel Buttons
-    button_frame = tk.Frame(edit_password_window, bg="#f0f0f0")
-    button_frame.pack(pady=20)
-
-    def update_password_action():
-        platform_name = entry_platform_name.get()
-        platform_label_value = platform_label.get()
-        username = entry_username.get()
-        password = entry_password.get()
-        confirm_password = entry_confirm_password.get()
-        url = entry_url.get()
-        notes = entry_notes.get("1.0", tk.END).strip()
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        if password != confirm_password:
-            messagebox.showwarning("Password Mismatch", "The passwords do not match.")
-            return
-        
-        if platform_name and platform_label_value and username and password:
-            encrypted_password = encrypt_things(password, key)
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute("UPDATE passwords SET platformName=?, platformLabel=?, platformUser=?, encryptedPassword=?, platformURL=?, platformNote=?, updatedAt=? WHERE id=?",
-                        (platform_name, platform_label_value, username, encrypted_password, url, notes, current_time, values[0]))
-            conn.commit()
-            conn.close()
-            messagebox.showinfo("Success", "Password updated successfully!")
-            edit_password_window.destroy()
-            load_passwords()
-        else:
-            messagebox.showwarning("Input Error", "Please fill in all fields.")
-            
-    ok_button = tk.Button(button_frame, text="OK", font=("Arial", 10, "bold"), bg="#4CAF50", fg="white", padx=20, pady=5, relief="raised", command=update_password_action)
-    ok_button.grid(row=0, column=0, padx=10, sticky="w")
-    ok_button.bind("<Enter>", lambda event: on_hover(event, ok_button, "#388E3C", "#4CAF50"))
-    ok_button.bind("<Leave>", lambda event: on_hover(event, ok_button, "#388E3C", "#4CAF50"))
-
-    cancel_button = tk.Button(button_frame, text="Cancel", font=("Arial", 10, "bold"), bg="#f44336", fg="white", padx=20, pady=5, relief="raised", command=edit_password_window.destroy)
-    cancel_button.grid(row=0, column=1, padx=10, sticky="w")
-    cancel_button.bind("<Enter>", lambda event: on_hover(event, cancel_button, "#d32f2f", "#f44336"))
-    cancel_button.bind("<Leave>", lambda event: on_hover(event, cancel_button, "#d32f2f", "#f44336"))
-
-    ok_button.focus_set()
-    edit_password_window.bind("<Return>", lambda event: update_password_action())
-
-def delete_selected_entry():
-    selected_item = tree.selection()
-    if not selected_item:
-        messagebox.showwarning("Selection Error", "Please select an entry to delete.")
-        return
-
-    item = tree.item(selected_item[0])
-    values = item["values"]
-
-    confirm = messagebox.askyesno("Delete Entry", f"Are you sure you want to delete the entry for {values[1]}?")
-    if confirm:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM passwords WHERE id=?", (values[0],))
-        conn.commit()
-        conn.close()
-        load_passwords()  # Refresh the password list
-        messagebox.showinfo("Success", "Password entry deleted successfully!")
-
-def show_home_content1():
-    global tree, context_menu, timer_label
-
-    # Function to display home content
-    for widget in main_frame.winfo_children():
-        if widget != timer_label:  # Do not destroy the timer label
-            widget.destroy()
-
-    # Load and resize the icon for the "Add Password" button
-    try:
-        original_icon = Image.open("Images/add_w.png")  # Ensure this path is correct
-        resized_icon = original_icon.resize((30, 30))
-        add_icon = ImageTk.PhotoImage(resized_icon)
-    except Exception as e:
-        print(f"Error loading image: {e}")
-        add_icon = None  # Fallback in case of error
-
-    # Create frames
-    frame_tree = tk.Frame(main_frame, bg="#f0f0f0")
-    frame_tree.pack(pady=10)
-
-    # Create a treeview to display passwords
-    tree = ttk.Treeview(frame_tree, columns=("ID", "Platform", "Label", "Username", "Password", "URL", "Notes", "Date Added", "Date Modified"), show="headings", height=10)
-    tree.heading("ID", text="ID")
-    tree.heading("Platform", text="Platform")
-    tree.heading("Label", text="Label")
-    tree.heading("Username", text="Username")
-    tree.heading("Password", text="Password")
-    tree.heading("URL", text="URL")
-    tree.heading("Notes", text="Notes")
-    tree.heading("Date Added", text="Date Added")
-    tree.heading("Date Modified", text="Date Modified")
-    
-    # Set column widths
-    tree.column("ID", width=30)
-    tree.column("Platform", width=200)
-    tree.column("Label", width=120)
-    tree.column("Username", width=200)
-    tree.column("Password", width=200)
-    tree.column("URL", width=200)
-    tree.column("Notes", width=300)
-    tree.column("Date Added", width=120)
-    tree.column("Date Modified", width=120)
-
-    tree.pack(side=tk.LEFT)
-
-    # Create a scrollbar
-    scrollbar = ttk.Scrollbar(frame_tree, orient="vertical", command=tree.yview)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    tree.configure(yscrollcommand=scrollbar.set)
-
-    tree.bind("<Button-3>", show_context_menu)  # Right-click for context menu
-
-    # Create context menu
-    context_menu = Menu(root, tearoff=0)
-    context_menu.add_command(label="Copy Platform", command=lambda: copy_value(tree.item(tree.selection()[0], "values")[1]))
-    context_menu.add_command(label="Copy Label", command=lambda: copy_value(tree.item(tree.selection()[0], "values")[2]))
-    context_menu.add_command(label="Copy Username", command=lambda: copy_value(tree.item(tree.selection()[0], "values")[3]))
-    context_menu.add_command(label="Copy Password", command=lambda: copy_value(tree.item(tree.selection()[0], "values")[9]))
-    context_menu.add_command(label="Copy URL", command=lambda: copy_value(tree.item(tree.selection()[0], "values")[5]))
-    context_menu.add_command(label="Copy Notes", command=lambda: copy_value(tree.item(tree.selection()[0], "values")[6]))
-    context_menu.add_separator()
-    context_menu.add_command(label="Edit Entry", command=edit_selected_entry)
-    context_menu.add_command(label="Delete Entry", command=delete_selected_entry)
-
-    # Load existing passwords into the table
-    load_passwords()
-
 # Function to show context menu for home items
 def show_item_context_menu(event, item_id, root):
     global selected_item_id, sqlite_obj
@@ -3177,9 +2837,9 @@ def show_item_context_menu(event, item_id, root):
         
         if result[1]:
             for row in result[1]:
-                if row[0] == item_id:
+                if int(row[0]) == item_id:
                     # Retrieve the 'isDeleted' value from the result
-                    is_deleted = result[1][0][12]  # Assuming 'isDeleted' is in the first column
+                    is_deleted = row[12]
         else:
             is_deleted = False  # Default to False if no result found
     except Exception as e:
@@ -3198,7 +2858,7 @@ def show_item_context_menu(event, item_id, root):
     context_menu.add_command(label="Copy Notes", command=lambda: copy_item_value('notes', root))
     context_menu.add_separator()
     
-    if is_deleted:
+    if is_deleted == 'True':
         # In trash: show restore and permanent delete
         context_menu.add_command(label="Restore Entry", command=lambda: restore_selected_home_entry(root))
         context_menu.add_command(label="Delete Permanently", command=lambda: delete_permanently_selected_home_entry(root))
@@ -3217,8 +2877,8 @@ def restore_selected_home_entry(root):
     # Restore entry
     try:
         # Perform the update using sqlite_obj
-        sqlite_obj.updateInTable("passwords", selected_item_id , "isDeleted" , 0 , commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", selected_item_id , "deletedAt" , None , commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", selected_item_id , "isDeleted" , 'False' , commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", selected_item_id , "deletedAt" , '' , commit = True , raiseError = True)
         messagebox.showinfo("Success", "Entry restored")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to restore entry: {e}")
@@ -3267,7 +2927,8 @@ def copy_item_value(field, root):
 
         if result[1]:
             for row in result[1]:
-                if row[0] == selected_item_id:
+                print(row[0])
+                if int(row[0]) == selected_item_id:
                     # Retrieve the item details
                     detail = row
                     break
@@ -3360,9 +3021,10 @@ def copy_value(value, root):
         # Close the clipboard
         win32clipboard.CloseClipboard()
         messagebox.showinfo("Copied", "Value copied to clipboard!")
-        countdown(settings[4], clipboard_history_enabled, root)
+        countdown(int(settings[4]), clipboard_history_enabled, root)
         
     except Exception as e:
+        print(f"Error copying value: {e}")
         messagebox.showerror("Error", f"Failed to copy value: {e}")
         
 def countdown(seconds, clipboard_history_enabled, root):
@@ -3421,7 +3083,7 @@ def delete_selected_home_entry(root):
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Perform the update
-        sqlite_obj.updateInTable("passwords", selected_item_id , "isDeleted" , 1 , commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", selected_item_id , "isDeleted" , 'True' , commit = True , raiseError = True)
         sqlite_obj.updateInTable("passwords", selected_item_id , "deletedAt" , current_time , commit = True , raiseError = True)
         messagebox.showinfo("Success", "Entry moved to trash")
     except Exception as e:
@@ -3433,6 +3095,7 @@ def delete_selected_home_entry(root):
 
 def select_item(e, id, item_frame, root):
     global selected_item_widget, details_placeholder, selected_item_id, unsaved_changes
+    selected_item_id = id
 
     if not item_frame.winfo_exists():
         return
@@ -3460,6 +3123,7 @@ unsaved_changes = False
 
 # Global variable declaration
 item_context_menu = None
+selected_item_id = None
 
 def show_home_content(root):
     global sqlite_obj   
@@ -3596,7 +3260,7 @@ def show_home_content(root):
             if result[1]:
                 for row in result[1]:
                     # Extract columns: 
-                    item_id = row[0]
+                    item_id = int(row[0])
                     platform_name = row[1]
                     platform_label = row[2]
                     platform_user = row[3]
@@ -3697,51 +3361,40 @@ def show_home_content(root):
                                     bg="#ffffff", fg="#666666", font=("Arial", 10), wraplength=400)
         details_placeholder.pack(expand=True, fill=tk.BOTH, padx=40, pady=40)
         
-        # Fetch filtered items from database using sqlite_obj
+        # Fetch all passwords from database
         try:
-            # Get all password entries (ID is first column due to makeSecure=True)
             result = sqlite_obj.getDataFromTable(
-                "passwords", 
-                raiseConversionError=True, 
+                "passwords",
+                raiseConversionError=True,
                 omitID=False
             )
-
-            if not result[1]:  # No data found
-                passwords = []
-            else:
-                # Filter passwords based on criteria
-                passwords = []
-                for row in result[1]:
-                    print(result[1])
-                    print(row)
-                    # Extract columns from row
-                    item_id = row[0]
-                    platform_name = row[1]
-                    platform_label = row[2]
-                    platform_user = row[3]
-                    updated_at = row[8]
-                    is_favorite = row[11]
-                    is_deleted = row[12]
-                    
-                    # Apply filters
-                    if filter_type == "favorites" and not is_favorite:
-                        continue
-                    elif filter_type == "type" and platform_label != filter_value:
-                        continue
-                    elif filter_type == "trash" and not is_deleted:
-                        continue
-                    elif filter_type != "trash" and is_deleted:
-                        continue
-                    
-                    # Add to results
-                    passwords.append((item_id, platform_name, platform_user, updated_at, platform_label))
-            
-            # Sort by platform name
-            passwords.sort(key=lambda x: x[1].lower())
-            
+            all_passwords = result[1] if result[0] and result[1] else []
         except Exception as e:
-            print(f"Database error during filter: {e}")
-            passwords = []
+            print(f"Database error: {e}")
+            all_passwords = []
+        
+        # Filter passwords based on criteria
+        passwords = []
+        for row in all_passwords:
+            # Row structure: [id, platformName, platformLabel, platformUser, ... , isDeleted, isFavourite, ...]
+            platform_label = row[2]
+            is_favourite = row[11]
+            is_deleted = row[12]
+            if filter_type == "trash":
+                if is_deleted == 'True':
+                    passwords.append(row)
+            elif filter_type == "favorites":
+                if is_deleted == 'False' and is_favourite == 'True':
+                    passwords.append(row)
+            elif filter_type == "type":
+                if is_deleted == 'False' and platform_label == filter_value:
+                    passwords.append(row)
+            else:  # Show all active passwords
+                if is_deleted == 'False':
+                    passwords.append(row)
+        
+        # Sort by platformName
+        passwords.sort(key=lambda row: row[1].lower())  # platformName at index 1
         
         # Display placeholder if no items
         if not passwords:
@@ -3750,10 +3403,17 @@ def show_home_content(root):
             placeholder.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         else:
             # Display filtered items
-            for id, platform, username, modified, label in passwords:
-                create_item_widget(id, platform, username, modified, label)
+            for row in passwords:
+                # Extract needed fields: id, platformName, platformUser, updatedAt, platformLabel
+                item_id = int(row[0])
+                platform_name = row[1]
+                label = row[2]  
+                username = row[3] 
+                modified = row[8]  
 
-    def create_item_widget(id, platform, username, modified, label):
+                create_item_widget(item_id, platform_name, label, username, modified)
+
+    def create_item_widget(id, platform, label, username, modified):
         item_frame = tk.Frame(items_container, bg="#ffffff", bd=1, relief=tk.RIDGE)
         item_frame.pack(fill=tk.BOTH, pady=0, padx=0, anchor="w")
         item_frame.password_id = id
@@ -3862,7 +3522,7 @@ def show_home_content(root):
     # Initial load with all items
     filter_items()
 
-def create_bottom_frame(parent, root, password_id, is_deleted, is_edit_mode, save_callback):
+def create_bottom_frame(parent, root, password_id, is_deleted, save_callback):
     bottom_frame = tk.Frame(parent, bg="#f0f0f0", height=50, relief="sunken", bd=1)
     bottom_frame.pack(side="bottom", fill="x", padx=0, pady=0)
     bottom_frame.pack_propagate(False)  # Keep fixed height
@@ -3872,7 +3532,7 @@ def create_bottom_frame(parent, root, password_id, is_deleted, is_edit_mode, sav
     button_container.pack(side=tk.RIGHT, padx=10, pady=5)
 
     # For items in trash
-    if is_deleted and password_id is not None:
+    if is_deleted == 'True' and password_id is not None:
         restore_btn = tk.Button(button_container, text="Restore", bg="#4CAF50", fg="white", 
                                padx=20, pady=5, command=lambda: restore_selected_home_entry(root))
         restore_btn.pack(side=tk.RIGHT, padx=10)
@@ -3944,19 +3604,19 @@ def show_password_details(root, password_id=None):
                 row = []
                 # Find the row that matches the password_id
                 for entry in result[1]:
-                    if entry[0] == password_id:  # Matching the password_id (assumed that entry[0] is the actual ID)
+                    if int(entry[0]) == password_id:  # Matching the password_id (assumed that entry[0] is the actual ID)
                         row = entry
                         break
                 
                 if row:
                     # Check if master password is required
-                    if row[9]:  # mp_reprompt is True
+                    if row[10] == 'True':  # mp_reprompt is True
                         if not require_master_password():  # If user cancels or enters wrong password
                             return  # Cancel the operation
 
                     # Decrypt password
                     try:
-                        decrypted_password = decrypt_things(row[3], key, row[8])
+                        decrypted_password = decrypt_things(row[4], key, row[9])
                     except Exception as e:
                         decrypted_password = "Error decrypting"
                 else:
@@ -4016,7 +3676,7 @@ def show_password_details(root, password_id=None):
     name_frame = tk.Frame(name_row, bg=normal_color)
     name_frame.pack(fill='x')
     name_entry = tk.Entry(name_frame, fg="#000000", bg=normal_color, relief="flat")
-    name_entry.insert(0, row[0] if row[0] else "")
+    name_entry.insert(0, row[1] if row[1] else "")
     name_entry.pack(side='left', fill='x', expand=True)
     
     # Add copy button for name field
@@ -4053,7 +3713,7 @@ def show_password_details(root, password_id=None):
     label_lframe.pack(anchor='w')
     ttk.Label(label_lframe, text="Label:", style="Normal.TLabel").pack(side='left')
     tk.Label(label_lframe, text="*", fg="red", bg=normal_color).pack(side='left')
-    label_var = tk.StringVar(value=row[1] if row[1] else "Work")
+    label_var = tk.StringVar(value=row[2] if row[2] else "Work")
     label_combobox = ttk.Combobox(label_row, textvariable=label_var, 
                                 values=["Work", "Education", "Entertainment", "Social Media", "Shopping", "Utilities", "Other"],
                                 width=27, state="readonly")
@@ -4071,7 +3731,7 @@ def show_password_details(root, password_id=None):
     user_frame = tk.Frame(user_row, bg=normal_color)
     user_frame.pack(fill='x')
     user_entry = tk.Entry(user_frame, fg="#000000", bg=normal_color, relief="flat")
-    user_entry.insert(0, row[2] if row[2] else "")
+    user_entry.insert(0, row[3] if row[3] else "")
     user_entry.pack(side='left', fill='x', expand=True)
     
     # Add copy button for username field
@@ -4202,7 +3862,7 @@ def show_password_details(root, password_id=None):
     tk.Label(aes_lframe, text="*", fg="red", bg=normal_color).pack(side='left')
 
     # AES Bit Combobox and Pick for Me button
-    aes_bit_var = tk.StringVar(value=str(row[8]) if row[8] else "256")
+    aes_bit_var = tk.StringVar(value=str(row[9]) if row[9] else "256")
     aes_bit_combobox = ttk.Combobox(aes_row, textvariable=aes_bit_var, 
                                 values=["128", "192", "256"], state="readonly")
     aes_bit_combobox.pack(side='left', fill='x', expand=True)
@@ -4246,7 +3906,7 @@ def show_password_details(root, password_id=None):
     url_frame = tk.Frame(url_row, bg=normal_color)
     url_frame.pack(fill='x')
     url_entry = tk.Entry(url_frame, fg="#000000", bg=normal_color, relief="flat")
-    url_entry.insert(0, row[4] if row[4] else "")
+    url_entry.insert(0, row[5] if row[5] else "")
     url_entry.pack(side='left', fill='x', expand=True)
     
     # Add copy button for URL field
@@ -4284,7 +3944,7 @@ def show_password_details(root, password_id=None):
     notes_frame = tk.Frame(notes_row, bg=normal_color)
     notes_frame.pack(fill='x')
     notes_text = tk.Text(notes_frame, height=4, width=22, fg="#000000", bg=normal_color, relief="flat")
-    notes_text.insert("1.0", row[5] if row[5] else "")
+    notes_text.insert("1.0", row[6] if row[6] else "")
     notes_text.pack(side='left', fill='x', expand=True)
     
     # Add copy button for notes field
@@ -4316,7 +3976,7 @@ def show_password_details(root, password_id=None):
     mp_row = tk.Frame(scrollable_details_frame, bg=normal_color)
     mp_row.pack(fill='x', padx=20, pady=(0, 5))
     ttk.Label(mp_row, text="Master Password Reprompt:", style="Normal.TLabel").pack(side='left', padx=(0, 5))
-    mp_reprompt_var = tk.BooleanVar(value=row[9] if row[9] is not None else False)
+    mp_reprompt_var = tk.BooleanVar(value=row[10] if row[10] is not None else False)
     mp_check = tk.Checkbutton(mp_row, variable=mp_reprompt_var, bg=normal_color)
     mp_check.pack(side='left')
     tk.Frame(scrollable_details_frame, height=1, bg="#cccccc").pack(fill='x', padx=20, pady=(0, 10))
@@ -4325,7 +3985,7 @@ def show_password_details(root, password_id=None):
     fav_row = tk.Frame(scrollable_details_frame, bg=normal_color)
     fav_row.pack(fill='x', padx=20, pady=(0, 5))
     ttk.Label(fav_row, text="Favourite:", style="Normal.TLabel").pack(side='left', padx=(0, 5))
-    is_favourite_var = tk.BooleanVar(value=row[10] if row[10] is not None else False)
+    is_favourite_var = tk.BooleanVar(value=row[11] if row[11] is not None else False)
     fav_check = tk.Checkbutton(fav_row, variable=is_favourite_var, bg=normal_color)
     fav_check.pack(side='left')
     tk.Frame(scrollable_details_frame, height=1, bg="#cccccc").pack(fill='x', padx=20, pady=(0, 10))
@@ -4491,7 +4151,7 @@ def show_password_details(root, password_id=None):
         }
     
     # Create the bottom frame
-    is_deleted = row[11] if row else False
+    is_deleted = row[12] if row else False
 
     # Define save callback function
     def save_callback():
@@ -4512,7 +4172,7 @@ def show_password_details(root, password_id=None):
                             root=root)
 
     # Create bottom frame with callback
-    bottom_frame = create_bottom_frame(details_frame, root, password_id, is_deleted, is_edit_mode, save_callback)
+    create_bottom_frame(details_frame, root, password_id, is_deleted, save_callback)
 
     # Now pack the bottom_frame at the bottom of the screen.
     details_frame.update_idletasks()  # Ensure the details_frame is fully drawn before packing
@@ -4633,8 +4293,8 @@ def save_password_changes(password_id, name, label, user, password, confirm_pass
         sqlite_obj.updateInTable("passwords", password_id , "platformNote" , notes, commit = True , raiseError = True)
         sqlite_obj.updateInTable("passwords", password_id , "updatedAt" , current_time, commit = True , raiseError = True)
         sqlite_obj.updateInTable("passwords", password_id , "aes_bits" , aes_bits, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , " mp_reprompt" , mp_reprompt, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , " isFavourite" , is_favourite, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , "mp_reprompt" , mp_reprompt, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , "isFavourite" , is_favourite, commit = True , raiseError = True)
         messagebox.showinfo("Success", "Password updated successfully")
         return True  # Return success to trigger show_home_content
     except Exception as e:
@@ -5189,6 +4849,7 @@ def get_label_color(label):
     return colors.get(label, "#95a5a6")  # Default color if label not found
 
 def show_password_health_content(root):
+    global sqlite_obj
     toggle_scrollbar(True)
     toggle_scrolling(True, root)
 
@@ -5205,31 +4866,60 @@ def show_password_health_content(root):
     tk.Label(container, text="Password Health Checker", font=("Helvetica", 16, "bold")).pack(pady=10)
     tk.Label(container, text="Identify weak, old or reused passwords. Click to take action now!").pack(pady=5)
 
-    # Function to identify weak, old, and reused passwords
+    # Function to identify weak, old, and reused passwords 
     def identify_password_issues():
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, platformName, platformLabel, platformUser, encryptedPassword, createdAt, updatedAt, aes_bits FROM passwords")
-        passwords = cursor.fetchall()
-        conn.close()
-
+        # Fetch all passwords using sqlite_obj
+        result = sqlite_obj.getDataFromTable(
+            "passwords",
+            raiseConversionError=True,
+            omitID=False
+        )
+        
+        if not result[0] or not result[1]:  # Check if query succeeded and has results
+            return [], [], [], []
+        
+        passwords = result[1]
+        
         weak_passwords = []
         old_passwords = []
         reused_passwords = []
         breached_passwords = []
-
-        decrypted_passwords = [decrypt_things(pwd[4], key, pwd[7]) for pwd in passwords]
-
+        
+        # Decrypt all passwords first
+        decrypted_passwords = []
+        for pwd in passwords:
+            decrypted = decrypt_things(pwd[4], key, pwd[9])
+            decrypted_passwords.append(decrypted)
+        
+        # Create a password count dictionary for reuse detection
+        password_count = {}
+        for decrypted in decrypted_passwords:
+            password_count[decrypted] = password_count.get(decrypted, 0) + 1
+        
+        current_time = datetime.now()
+        
         for i, pwd in enumerate(passwords):
             decrypted_password = decrypted_passwords[i]
-            if len(decrypted_password) < 8 or not re.search(r"[A-Z]", decrypted_password) or not re.search(r"[a-z]", decrypted_password) or not re.search(r"[0-9]", decrypted_password):
+            
+            # Weak password check
+            if (len(decrypted_password) < 8 or 
+                not re.search(r"[A-Z]", decrypted_password) or 
+                not re.search(r"[a-z]", decrypted_password) or 
+                not re.search(r"[0-9]", decrypted_password)):
                 weak_passwords.append(pwd)
-            if (datetime.now() - datetime.strptime(pwd[6], "%Y-%m-%d %H:%M:%S")).days > 365:
+            
+            # Old password check
+            updated_at = datetime.strptime(pwd[8], "%Y-%m-%d %H:%M:%S")
+            if (current_time - updated_at).days > 365:
                 old_passwords.append(pwd)
-            if decrypted_passwords.count(decrypted_password) > 1:
+            
+            # Reused password check
+            if password_count[decrypted_password] > 1:
                 reused_passwords.append(pwd)
+            
+            # Breached password check
             breach_msg, count, error = check_pwned_password(decrypted_password)
-            if not error and count is not None:
+            if not error and count is not None and count > 0:
                 breached_passwords.append(pwd)
 
         return weak_passwords, old_passwords, reused_passwords, breached_passwords
@@ -5273,7 +4963,7 @@ def show_password_health_content(root):
             change_button.pack(pady=5, fill="x")
 
             # Delete button
-            delete_button = tk.Button(buttons_frame, text="Delete", command=lambda e=entry: delete_selected_entry_by_id(e[0]))
+            delete_button = tk.Button(buttons_frame, text="Delete", command=lambda e=entry: delete_selected_entry(e[0], root))
             delete_button.pack(pady=5, fill="x")
 
         # Ensure the layout is updated correctly after the entries are shown
@@ -5332,311 +5022,21 @@ def show_password_health_content(root):
         # Then show the password details for the selected ID
         root.after(100, lambda: show_password_details(root, password_id))
 
-def edit_selected_entry_by_id(password_id):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM passwords WHERE id=?", (password_id,))
-    entry = cursor.fetchone()
-    conn.close()
-
-    if not entry:
-        messagebox.showwarning("Selection Error", "Password entry not found.")
-        return
-
-    # Create a Toplevel window (pop-up)
-    edit_password_window = tk.Toplevel(root)
-    edit_password_window.title("Edit Entry")
-    window_width = 550
-    window_height = 700
-
-    # Center the window
-    screen_width = edit_password_window.winfo_screenwidth()
-    screen_height = edit_password_window.winfo_screenheight()
-    x = (screen_width - window_width) // 2
-    y = (screen_height - window_height) // 2
-    edit_password_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
-    edit_password_window.configure(bg="#f0f0f0")
-
-    # Define padding
-    label_padx = 20
-    entry_padx = 10
-    pady = 10
-
-    # Create form frame
-    form_frame = tk.Frame(edit_password_window, bg="#f0f0f0")
-    form_frame.pack(pady=20)
-
-    # Platform Name
-    tk.Label(form_frame, text="Platform Name:", anchor="w").grid(row=0, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_platform_name = tk.Entry(form_frame, width=30)
-    entry_platform_name.insert(0, entry[1])
-    entry_platform_name.grid(row=0, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Label (Category)
-    tk.Label(form_frame, text="Label:", anchor="w").grid(row=1, column=0, padx=label_padx, pady=pady, sticky="w")
-    label_options = ["Banking", "Browser", "Cloud Services", "Development", "Education", "Email", "Entertainment", 
-                    "Finance", "Forums", "Gaming", "Government", "Health", "News", "Personal", "Shopping", 
-                    "Social Media", "Sports", "Streaming", "Travel", "Utilities", "Work", "Others"]
-    platform_label = ttk.Combobox(form_frame, values=label_options, width=27)
-    platform_label.set(entry[2])
-    platform_label.grid(row=1, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Username
-    tk.Label(form_frame, text="Username:", anchor="w").grid(row=2, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_username = tk.Entry(form_frame, width=30)
-    entry_username.insert(0, entry[3])
-    entry_username.grid(row=2, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Password Field
-    tk.Label(form_frame, text="Password:", bg="#f0f0f0", anchor="w").grid(row=3, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_password = tk.Entry(form_frame, show="*", width=30)
-    entry_password.insert(0, decrypt_things(entry[4], key))
-    entry_password.grid(row=3, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Confirm Password
-    tk.Label(form_frame, text="Confirm Password:", anchor="w").grid(row=4, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_confirm_password = tk.Entry(form_frame, show="*", width=30)
-    entry_confirm_password.insert(0, decrypt_things(entry[4], key))
-    entry_confirm_password.grid(row=4, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Show/Hide password icon
-    def toggle_password_visibility():
-        if entry_password.cget('show') == '*':
-            entry_password.config(show='')
-            entry_confirm_password.config(show='')
-            eye_icon.config(image=show_password)
-        else:
-            entry_password.config(show='*')
-            entry_confirm_password.config(show='*')
-            eye_icon.config(image=hide_password)
-
-    show_password = tk.PhotoImage(file="Images/show_password_b.png").subsample(3, 3)
-    hide_password = tk.PhotoImage(file="Images/hide_password_b.png").subsample(3, 3)
-    eye_icon = tk.Label(form_frame, image=hide_password, cursor="hand2", bg="#f0f0f0")
-    eye_icon.grid(row=3, column=2, padx=5, sticky="w")
-    eye_icon.bind("<Button-1>", lambda e: toggle_password_visibility())
-
-    # Add breach check button next to show/hide
-    breach_icon = tk.PhotoImage(file="Images/breach_check_b.png").subsample(15, 15)
-    breach_button = tk.Button(
-        form_frame,
-        image=breach_icon,
-        bg="#f0f0f0",
-        relief="flat",
-        cursor="hand2",
-        command=lambda: perform_breach_check(entry_password.get(), edit_password_window)
-    )
-    breach_button.grid(row=3, column=3, padx=5, sticky="w")
-    breach_button.image = breach_icon  # Keep reference
-
-    # AES Bit Selection
-    tk.Label(form_frame, text="AES Bit:", anchor="w").grid(row=5, column=0, padx=label_padx, pady=pady, sticky="w")
-    aes_bit_options = ["128", "192", "256"]
-    aes_bit_combobox = ttk.Combobox(form_frame, values=aes_bit_options, width=27)
-    aes_bit_combobox.grid(row=5, column=1, padx=entry_padx, pady=pady, sticky="w")
-    aes_bit_combobox.set(256)
-    selected_aes_bit = tk.IntVar(value=256)
-
-    # Password Strength Indicator
-    password_strength_label = tk.Label(form_frame, text="Strength: Weak", fg="red", anchor="w")
-    password_strength_label.grid(row=6, column=1, padx=entry_padx, pady=5, sticky="w")
-
-    # Attack Method ComboBox
-    tk.Label(form_frame, text="Attack Method:", anchor="w").grid(row=7, column=0, padx=label_padx, pady=pady, sticky="w")
-    attack_method_options = ["Brute Force", "Dictionary Attack", "Rainbow Table"]
-    attack_method_var = tk.StringVar(value="Brute Force")
-    attack_method_combobox = ttk.Combobox(form_frame, values=attack_method_options, width=27, textvariable=attack_method_var)
-    attack_method_combobox.grid(row=7, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    def update_password_strength(event):
-        password = entry_password.get()
-        strength = check_password_strength(password)
-        color_map = {"Weak": "red", "Medium": "orange", "Strong": "green"}
-        strength_color = color_map.get(strength, "black")
-        password_strength_label.config(text=f"Strength: {strength}", fg=strength_color)
-
-        crack_times = estimate_crack_time(password, selected_aes_bit.get(), attack_method_var.get())
-        
-        if not hasattr(entry_password, 'crack_time_labels'):
-            entry_password.crack_time_labels = {}
-            crack_frame = tk.Frame(form_frame)
-            crack_frame.grid(row=10, column=0, columnspan=4, pady=5, sticky="w")
-            tk.Label(crack_frame, text="Estimated Time to Crack:", font=("Arial", 9, "bold")).pack(anchor="w")
-            
-            algorithms = ["AES Brute-Force", "Password Brute-Force", "Dictionary Attack", "Rainbow Table", "Breach Check"]
-            for algo in algorithms:
-                frame = tk.Frame(crack_frame)
-                frame.pack(anchor="w")
-                tk.Label(frame, text=f"{algo}:", width=16, anchor="w").pack(side=tk.LEFT)
-                label = tk.Label(frame, text="", fg="red")
-                label.pack(side=tk.LEFT)
-                entry_password.crack_time_labels[algo] = label
-        
-        for algo, time in crack_times.items():
-            label = entry_password.crack_time_labels[algo]
-            label.config(text=time)
-            if algo == "Breach Check":
-                color = "red" if "⚠️" in time or time == "No password entered" else "green"
-                label.config(fg=color)
-            elif algo == "Dictionary Attack":
-                color = "red" if time in ["Dictionary attack disabled", "No password entered", "Found in wordlist"] else "green"
-                label.config(fg=color)
-            else:
-                color = "green" if "yrs" in time else "orange" if "days" in time else "red"
-                label.config(fg=color)
-
-    def on_aes_bit_change(event):
-        selected_aes_bit.set(int(aes_bit_combobox.get()))
-        update_password_strength(None)
-
-    aes_bit_combobox.bind("<<ComboboxSelected>>", on_aes_bit_change)
-    attack_method_combobox.bind("<<ComboboxSelected>>", update_password_strength)
-    entry_password.bind("<KeyRelease>", update_password_strength)
-    update_password_strength(None)  # <-- Auto-check strength on form load
-
-    # URL
-    tk.Label(form_frame, text="URL:", anchor="w").grid(row=8, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_url = tk.Entry(form_frame, width=30)
-    entry_url.insert(0, entry[5])
-    entry_url.grid(row=8, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Notes
-    tk.Label(form_frame, text="Notes:", anchor="nw").grid(row=9, column=0, padx=label_padx, pady=pady, sticky="nw")
-    entry_notes = tk.Text(form_frame, height=4, width=30)
-    entry_notes.insert("1.0", entry[6])
-    entry_notes.grid(row=9, column=1, padx=entry_padx, pady=pady, sticky="w", columnspan=2)
-
-    # Generate Password Menu
-    def show_generate_menu(event):
-        generate_menu.post(event.x_root, event.y_root)
-        
-    def generate_now():
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM password_criteria ORDER BY id DESC LIMIT 1")
-        criteria = cursor.fetchone()
-        conn.close()
-
-        if not criteria:
-            messagebox.showwarning("Criteria Error", "No password generation criteria found.")
-            return
-
-        length, include_uppercase, include_lowercase, include_digits, include_minus, \
-        include_underline, include_space, include_special, include_brackets, include_latin1 = criteria[1:]
-
-        characters = ""
-        if include_uppercase: characters += string.ascii_uppercase
-        if include_lowercase: characters += string.ascii_lowercase
-        if include_digits: characters += string.digits
-        if include_minus: characters += "-"
-        if include_underline: characters += "_"
-        if include_space: characters += " "
-        if include_special: characters += "!\"#$%&'*+,-./:;=?@\\^_`|~"
-        if include_brackets: characters += "[]{}()<>"
-        if include_latin1: characters += ''.join(chr(i) for i in range(160, 256))
-
-        if not characters:
-            messagebox.showwarning("Selection Error", "Please select at least one character type.")
-            return
-
-        while True:
-            new_password = generate_password(length, characters)
-            if check_password_strength(new_password) == "Strong":
-                break
-
-        entry_password.delete(0, tk.END)
-        entry_password.insert(0, new_password)
-        update_password_strength(None)
-
-    def setup_password_generation():
-        open_password_generation_form()
-
-    # Generate Password Button
-    generate_menu = tk.Menu(root, tearoff=0)
-    generate_menu.add_command(label="Generate Now", command=generate_now)
-    generate_menu.add_command(label="Setup Password Generation", command=setup_password_generation)
-    
-    generate_button = tk.Button(form_frame, text="Generate", font=("Arial", 10, "bold"), bg="#4CAF50", fg="white", padx=5, pady=2, relief="raised")
-    generate_button.grid(row=3, column=4, padx=5, sticky="w")
-    generate_button.bind("<Button-1>", show_generate_menu)
-    generate_button.bind("<Enter>", lambda event: on_hover(event, generate_button, "#45a049", "#4CAF50"))
-    generate_button.bind("<Leave>", lambda event: on_hover(event, generate_button, "#45a049", "#4CAF50"))
-
-    # OK & Cancel Buttons
-    button_frame = tk.Frame(edit_password_window, bg="#f0f0f0")
-    button_frame.pack(pady=20)
-
-    def update_password_action():
-        platform_name = entry_platform_name.get()
-        platform_label_value = platform_label.get()
-        username = entry_username.get()
-        password = entry_password.get()
-        confirm_password = entry_confirm_password.get()
-        url = entry_url.get()
-        notes = entry_notes.get("1.0", tk.END).strip()
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        if password != confirm_password:
-            messagebox.showwarning("Password Mismatch", "The passwords do not match.")
-            return
-        
-        if platform_name and platform_label_value and username and password:
-            encrypted_password = encrypt_things(password, key)
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute("UPDATE passwords SET platformName=?, platformLabel=?, platformUser=?, encryptedPassword=?, platformURL=?, platformNote=?, updatedAt=? WHERE id=?",
-                        (platform_name, platform_label_value, username, encrypted_password, url, notes, current_time, entry[0]))
-            conn.commit()
-            conn.close()
-            messagebox.showinfo("Success", "Password updated successfully!")
-            edit_password_window.destroy()
-            show_password_health_content(root)  # Or load_passwords() depending on context
-        else:
-            messagebox.showwarning("Input Error", "Please fill in all fields.")
-            
-    ok_button = tk.Button(button_frame, text="OK", font=("Arial", 10, "bold"), bg="#4CAF50", fg="white", padx=20, pady=5, relief="raised", command=update_password_action)
-    ok_button.grid(row=0, column=0, padx=10, sticky="w")
-    ok_button.bind("<Enter>", lambda event: on_hover(event, ok_button, "#388E3C", "#4CAF50"))
-    ok_button.bind("<Leave>", lambda event: on_hover(event, ok_button, "#388E3C", "#4CAF50"))
-
-    cancel_button = tk.Button(button_frame, text="Cancel", font=("Arial", 10, "bold"), bg="#f44336", fg="white", padx=20, pady=5, relief="raised", command=edit_password_window.destroy)
-    cancel_button.grid(row=0, column=1, padx=10, sticky="w")
-    cancel_button.bind("<Enter>", lambda event: on_hover(event, cancel_button, "#d32f2f", "#f44336"))
-    cancel_button.bind("<Leave>", lambda event: on_hover(event, cancel_button, "#d32f2f", "#f44336"))
-
-    ok_button.focus_set()
-    edit_password_window.bind("<Return>", lambda event: update_password_action())
-
-# New delete_selected_entry_by_id function
-def delete_selected_entry_by_id(password_id):
+def delete_selected_entry(password_id, root):
+    global sqlite_obj
     confirm = messagebox.askyesno("Delete Entry", "Are you sure you want to delete this entry?")
     if confirm:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM passwords WHERE id=?", (password_id,))
-        conn.commit()
-        conn.close()
-        messagebox.showinfo("Success", "Password entry deleted successfully!")
-        show_password_health_content()  # Refresh the password list
+        try:
+            # Delete the entry
+            sqlite_obj.deleteDataInTable("passwords", password_id, commit = True , raiseError = True , updateId = True)
+            
+            messagebox.showinfo("Success", "Password entry deleted successfully!")
+            show_password_health_content(root)  # Refresh the password list
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to delete entry: {e}")
         
-# def insert_sample_data():
-#     conn = sqlite3.connect(DB_FILE)
-#     cursor = conn.cursor()
-#
-#     # Sample data with an old date
-#     sample_data = [
-#         ("Sample Platform 1", "Label 1", "User 1", encrypt_things("Password1!", derive_key(master_password)), "http://example.com", "Note 1", "2020-01-01 12:00:00", "2020-01-01 12:00:00"),
-#         ("Sample Platform 2", "Label 2", "User 2", encrypt_things("Password2@", derive_key(master_password)), "http://example.com", "Note 2", "2021-01-01 12:00:00", "2021-01-01 12:00:00"),
-#         ("Sample Platform 3", "Label 3", "User 3", encrypt_things("Password3#", derive_key(master_password)), "http://example.com", "Note 3", "2022-01-01 12:00:00", "2022-01-01 12:00:00")
-#     ]
-#
-#     cursor.executemany('''INSERT INTO passwords (platformName, platformLabel, platformUser, encryptedPassword, platformURL, platformNote, createdAt, updatedAt)
-#                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', sample_data)
-#
-#     conn.commit()
-#     conn.close()
-
 def show_settings_content(root):
+    global sqlite_obj
     toggle_scrollbar(True)
     toggle_scrolling(True, root)
 
@@ -5753,21 +5153,21 @@ def show_settings_content(root):
                 return
             password_verified = True  # Set the flag after verifying the password
 
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
         try:
-            cursor.execute(f"UPDATE settings SET {setting_name} = ? WHERE rowid = 1", (setting_value,))
-            conn.commit()
-        except sqlite3.Error as e:
+            # Prepare the update data as a dictionary
+            result = sqlite_obj.getDataFromTable("settings", raiseConversionError=True, omitID=False)
+            id = result[1][0][0] 
+            # Perform the update using sqlite_obj
+            sqlite_obj.updateInTable("settings", id , setting_name , setting_value, commit = True , raiseError = True)
+            # Reload settings after saving
+            global settings
+            settings = load_settings()
+            messagebox.showinfo("Success", "Settings saved successfully!")
+            if callback:
+                callback()
+
+        except Exception as e:
             print(f"Database error: {e}")
-            conn.rollback()
-        finally:
-            conn.close()
-        # Reload settings after saving
-        global settings
-        settings = load_settings()
-        if callback:
-            callback()
 
     def show_mfa_settings():
         for widget in content_area.winfo_children():
@@ -5899,14 +5299,29 @@ def show_settings_content(root):
         new_keys = [''.join(random.choices(string.ascii_uppercase + string.digits, k=8)) for _ in range(10)]
         hashed_recovery_keys = [hashlib.sha256(key.encode()).hexdigest() for key in new_keys]
 
-        # Invalidate old keys and save new keys in the database
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM recovery_keys")  # Clear old recovery keys
-        for hashed_key in hashed_recovery_keys:
-            cursor.execute("INSERT INTO recovery_keys (hashed_key) VALUES (?)", (hashed_key,))
-        conn.commit()
-        conn.close()
+        try:
+            # Fetch existing recovery keys
+            result = sqlite_obj.getDataFromTable("recovery_keys", raiseConversionError=True, omitID=False)
+
+            if result[1]:  # Check if there are existing keys
+                for idx, row in enumerate(result[1]):
+                    row_id = int(row[0])  # Get the ID of the current row
+
+                    # Update the hashed_key in the table for each row
+                    sqlite_obj.updateInTable(
+                        "recovery_keys", 
+                        row_id, 
+                        "hashed_key", 
+                        hashed_recovery_keys[idx],  # Update with the corresponding new hashed key
+                        commit=True, 
+                        raiseError=True
+                    )
+            
+            messagebox.showinfo("Success", "Recovery keys updated successfully!")
+
+        except Exception as e:
+            print(f"Failed to save recovery keys: {e}")
+            messagebox.showerror("Error", f"Failed to save recovery keys: {e}")
 
         # Display the new keys to the user
         for widget in keys_frame.winfo_children():
@@ -6202,8 +5617,8 @@ def increment_login_attempt():
     
     # Get the first row (attempts, lockout_until) and its ID
     id_value, current_attempts, last_attempt, lockout_until_str = result[1][0]  # The first element is the ID
-    
-    new_attempts = current_attempts + 1
+    print(f"Current attempts: {current_attempts}, Last attempt: {last_attempt}, Lockout until: {lockout_until_str}")
+    new_attempts = int(current_attempts) + 1
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     if new_attempts >= 5:
@@ -6558,22 +5973,29 @@ def main():
                     hashed_recovery_keys = get_recovery_keys()
                     if verify_recovery_key(recovery_key, hashed_recovery_keys):
                         reset_login_attempts()
-                        # Retrieve the stored key
-                        conn = sqlite3.connect(DB_FILE)
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT hashed_password FROM master_password")
-                        result = cursor.fetchone()
-                        conn.close()
+                        # Retrieve the stored key using sqlite_obj
+                        try:
+                            result = sqlite_obj.getDataFromTable(
+                                "master_password",
+                                raiseConversionError=True,
+                                omitID=True
+                            )
 
-                        if result:
-                            stored_hashed_password = base64.b64decode(result[0])
-                            key = stored_hashed_password[16:]
-                            master_password = recovery_key
-                            login_root.withdraw()
-                            check_mfa_and_show_main_window()
-                            return
-                        else:
-                            messagebox.showerror("Error", "No recovery key found! Please enter a valid recovery key.")
+                            if result[1]:
+                                stored_hashed_password = base64.b64decode(result[1][0][0])
+                                key = stored_hashed_password[16:]
+                                master_password = recovery_key
+                                login_root.withdraw()
+                                check_mfa_and_show_main_window()
+                                return
+                            else:
+                                messagebox.showerror("Error", "No recovery key found! Please enter a valid recovery key.")
+                                login_root.destroy()
+                                show_login_screen()
+                                return
+
+                        except Exception as e:
+                            messagebox.showerror("Error", f"Failed to retrieve recovery key: {e}")
                             login_root.destroy()
                             show_login_screen()
                             return
