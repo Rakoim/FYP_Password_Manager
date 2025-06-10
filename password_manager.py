@@ -2380,450 +2380,16 @@ def open_attack_window(parent_window, current_password, aes_bit):
     # Store window reference
     open_attack_window.attack_win = attack_win
     attack_win.protocol("WM_DELETE_WINDOW", lambda: attack_win.destroy())
-
-def validate_non_negative_integer(value):
-    return value.isdigit() or value == ""
-
-def is_valid_input(text, max_length=255):
-    """Basic sanitization check for input fields."""
-    return bool(text) and isinstance(text, str) and len(text.strip()) <= max_length
     
-def open_add_password_form1():
-    # Check if the window is already open
-    if hasattr(open_add_password_form, "add_password_window") and open_add_password_form.add_password_window.winfo_exists():
-        # If it exists, focus on the existing window
-        open_add_password_form.add_password_window.lift()
-        open_add_password_form.add_password_window.focus()
-        return
-
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        SELECT dictionary_path, rainbow_table_path, guess_per_sec, thread_count, guess_per_sec_threshold 
-        FROM attack_settings 
-        LIMIT 1
-    ''')
-    row = cursor.fetchone()
-
-    if row:
-        dictionary_path = row[0]
-        rainbow_path = row[1]
-        guess_per_sec = row[2]
-        thread_count_val = row[3]
-        threshold_val = row[4]
-    else:
-        dictionary_path = ""
-        rainbow_path = ""
-        guess_per_sec = 3000000
-        thread_count_val = 1
-        threshold_val = 10000000
-
-    # Create a Toplevel window (pop-up)
-    add_password_window = tk.Toplevel(root)
-    add_password_window.title("Add New Entry")
-    window_width = 550
-    window_height = 900  # Increased height to accommodate new field
-
-    # Center the window on the screen
-    screen_width = add_password_window.winfo_screenwidth()
-    screen_height = add_password_window.winfo_screenheight()
-    x = (screen_width - window_width) // 2
-    y = (screen_height - window_height) // 2
-    add_password_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
-
-    # Set the theme to match the initial setup
-    add_password_window.configure(bg="#f0f0f0")
-    add_password_window.grab_set()
-
-    # Define padding
-    label_padx = 20
-    entry_padx = 10
-    pady = 10
-
-    # Create a Frame for form fields (ensures alignment)
-    form_frame = tk.Frame(add_password_window, bg="#f0f0f0")
-    form_frame.pack(pady=20)
-
-    # Function to create label with red star
-    def create_required_label(text):
-        label_frame = tk.Frame(form_frame, bg="#f0f0f0")
-        tk.Label(label_frame, text=text, anchor="w", bg="#f0f0f0").pack(side="left")
-        tk.Label(label_frame, text="*", fg="red", bg="#f0f0f0").pack(side="left")
-        return label_frame
-
-    # Platform Name
-    platform_label_frame = create_required_label("Platform Name:")
-    platform_label_frame.grid(row=0, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_platform_name = tk.Entry(form_frame, width=30)
-    entry_platform_name.grid(row=0, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Label (Category)
-    label_frame = create_required_label("Label:")
-    label_frame.grid(row=1, column=0, padx=label_padx, pady=pady, sticky="w")
-    label_options = ["Work", "Entertainment", "Education", "Social Media", "Shopping", "Utilities", "Other"]
-    platform_label = ttk.Combobox(form_frame, values=label_options, width=27, state="readonly")
-    platform_label.grid(row=1, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Username
-    username_label_frame = create_required_label("Username:")
-    username_label_frame.grid(row=2, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_username = tk.Entry(form_frame, width=30)
-    entry_username.grid(row=2, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Password Field
-    password_label_frame = create_required_label("Password:")
-    password_label_frame.grid(row=3, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_password = tk.Entry(form_frame, show="*", width=30)
-    entry_password.grid(row=3, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Confirm Password
-    confirm_label_frame = create_required_label("Confirm Password:")
-    confirm_label_frame.grid(row=4, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_confirm_password = tk.Entry(form_frame, show="*", width=30)
-    entry_confirm_password.grid(row=4, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Create a container frame for password buttons
-    password_buttons_container = tk.Frame(form_frame, bg="#f0f0f0")
-    password_buttons_container.grid(row=3, column=2, sticky="w")
-
-    # Load images for Show/Hide password
-    show_password = tk.PhotoImage(file="Images/show_password_b.png").subsample(3, 3)
-    hide_password = tk.PhotoImage(file="Images/hide_password_b.png").subsample(3, 3)
-
-    # Show/Hide Password Button
-    eye_icon = tk.Label(password_buttons_container, image=hide_password, cursor="hand2", bg="#f0f0f0")
-    eye_icon.pack(side="left", padx=(0, 5))
-    eye_icon.bind("<Button-1>", lambda e: toggle_password_visibility(entry_password, entry_confirm_password, eye_icon, show_password, hide_password))
-    # Add tooltip
-    eye_icon.bind("<Enter>", lambda e: show_tooltip(e.widget, "Toggle password visibility"))
-    eye_icon.bind("<Leave>", lambda e: hide_tooltip())
-    
-    # Breach Check button
-    breach_icon = tk.PhotoImage(file="Images/breach_check_b.png").subsample(3, 3)
-    breach_button = tk.Button(
-        password_buttons_container,
-        image=breach_icon,
-        bg="#f0f0f0",
-        relief="flat",
-        cursor="hand2",
-        command=lambda: perform_breach_check(entry_password.get(), add_password_window)
-    )
-    breach_button.pack(side="left", padx=(0, 5))
-    breach_button.image = breach_icon
-    # Add tooltip
-    breach_button.bind("<Enter>", lambda e: show_tooltip(e.widget, "Check if password has been breached"))
-    breach_button.bind("<Leave>", lambda e: hide_tooltip())
-
-    # AES Bit Selection
-    aes_label_frame = create_required_label("AES Bit:")
-    aes_label_frame.grid(row=5, column=0, padx=label_padx, pady=pady, sticky="w")
-    aes_bit_options = ["128", "192", "256"]
-    aes_bit_combobox = ttk.Combobox(form_frame, values=aes_bit_options, width=27, state="readonly")
-    aes_bit_combobox.grid(row=5, column=1, padx=entry_padx, pady=pady, sticky="w")
-    aes_bit_combobox.set(256)  # Default to 256-bit
-    selected_aes_bit = tk.IntVar(value=256)
-
-    # Password Strength Indicator
-    password_strength_label = tk.Label(form_frame, text="Strength: Weak", fg="red", anchor="w")
-    password_strength_label.grid(row=6, column=1, padx=entry_padx, pady=5, sticky="w")
-
-    # URL
-    tk.Label(form_frame, text="URL:", anchor="w", bg="#f0f0f0").grid(row=7, column=0, padx=label_padx, pady=pady, sticky="w")
-    entry_url = tk.Entry(form_frame, width=30)
-    entry_url.grid(row=7, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Notes
-    tk.Label(form_frame, text="Notes:", anchor="nw", bg="#f0f0f0").grid(row=8, column=0, padx=label_padx, pady=pady, sticky="nw")
-    entry_notes = tk.Text(form_frame, height=4, width=30)
-    entry_notes.grid(row=8, column=1, padx=entry_padx, pady=pady, sticky="w", columnspan=2)
-
-    # Master Password Reprompt Label and Checkbox
-    mp_reprompt_label_frame = create_required_label("Master Password Reprompt:")
-    mp_reprompt_label_frame.grid(row=9, column=0, padx=label_padx, pady=pady, sticky="w")
-    mp_reprompt_var = tk.BooleanVar(value=True)  # Default to checked
-    mp_reprompt_check = tk.Checkbutton(form_frame, variable=mp_reprompt_var, bg="#f0f0f0")
-    mp_reprompt_check.grid(row=9, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    # Attack Method ComboBox
-    tk.Label(form_frame, text="Attack Method:", anchor="w").grid(row=10, column=0, padx=label_padx, pady=pady, sticky="w")
-    attack_method_options = ["Password Brute-Force", "AES Brute-Force", "Dictionary Attack", "Rainbow Table"]
-    attack_method_var = tk.StringVar(value="Password Brute-Force")
-    attack_method_combobox = ttk.Combobox(form_frame, values=attack_method_options, width=27, textvariable=attack_method_var, state="readonly")
-    attack_method_combobox.grid(row=10, column=1, padx=entry_padx, pady=pady, sticky="w")
-    
-    # Test Button
-    test_button = tk.Button(
-        form_frame, 
-        text="Test", 
-        bg="#2196F3", 
-        fg="white", 
-        padx=10, 
-        pady=2,
-        command=lambda: open_attack_window(add_password_window, attack_method_var.get(), entry_password.get(), aes_bit_combobox.get(), dict_path_entry.get(), rainbow_path_entry.get())
-    )
-    test_button.grid(row=10, column=2, padx=5, pady=pady, sticky="w")
-    test_button.bind("<Enter>", lambda e: (on_hover_browse(e, test_button), show_tooltip(e.widget, "Test password strength against selected attack method")))
-    test_button.bind("<Leave>", lambda e: (on_hover_browse(e, test_button), hide_tooltip()))
-
-    # Container frames for dictionary and rainbow path buttons
-    dict_buttons_container = tk.Frame(form_frame, bg="#f0f0f0")
-    rainbow_buttons_container = tk.Frame(form_frame, bg="#f0f0f0")
-
-    # Dictionary Path Fields
-    dict_path_label = tk.Label(form_frame, text="Dictionary Path:", anchor="w", bg="#f0f0f0")
-    dict_path_entry = tk.Entry(form_frame, width=30)
-    dict_path_entry.insert(0, dictionary_path)
-
-    # Dictionary Browse Button 
-    dict_browse_button = tk.Button(
-        dict_buttons_container, 
-        text="Browse", 
-        bg="#2196F3", 
-        fg="white", 
-        padx=3, 
-        pady=2,
-        command=lambda: browse_dictionary_path(dict_path_entry, add_password_window, ui_context)
-    )
-    dict_browse_button.pack(side="left", padx=(0, 5))
-    dict_browse_button.bind(
-        "<Enter>", 
-        lambda e: (on_hover_browse(e, dict_browse_button), show_tooltip(e.widget, "Browse for dictionary file"))
-    )
-    dict_browse_button.bind(
-        "<Leave>", 
-        lambda e: (on_hover_browse(e, dict_browse_button), hide_tooltip())
-    )
-
-    # Rainbow Table Path Fields
-    rainbow_path_label = tk.Label(form_frame, text="Rainbow Table Path:", anchor="w", bg="#f0f0f0")
-    rainbow_path_entry = tk.Entry(form_frame, width=30)
-    rainbow_path_entry.insert(0, rainbow_path)
-
-    # Rainbow Table Browse Button
-    rainbow_browse_button = tk.Button(
-        rainbow_buttons_container, 
-        text="Browse", 
-        bg="#2196F3", 
-        fg="white", 
-        padx=3, 
-        pady=2,
-        command=lambda: browse_rainbow_path(rainbow_path_entry, add_password_window, ui_context)
-    )
-    rainbow_browse_button.pack(side="left", padx=(0, 5))
-    rainbow_browse_button.bind(
-        "<Enter>", 
-        lambda e: (on_hover_browse(e, rainbow_browse_button), show_tooltip(e.widget, "Browse for rainbow table file"))
-    )
-    rainbow_browse_button.bind(
-        "<Leave>", 
-        lambda e: (on_hover_browse(e, rainbow_browse_button), hide_tooltip())
-    )
-
-    # Update the show_attack_fields function
-    def show_attack_fields(*args):
-        method = attack_method_var.get()
-        for widget in form_frame.grid_slaves():
-            if int(widget.grid_info().get("row", 0)) in (11, 12):
-                widget.grid_forget()
-
-        if method == "Dictionary Attack":
-            dict_path_label.grid(row=11, column=0, padx=label_padx, pady=5, sticky="w")
-            dict_path_entry.grid(row=11, column=1, padx=entry_padx, pady=5, sticky="w")
-            dict_buttons_container.grid(row=11, column=2, columnspan=2, padx=5, pady=5, sticky="w")
-        elif method == "Rainbow Table":
-            rainbow_path_label.grid(row=12, column=0, padx=label_padx, pady=5, sticky="w")
-            rainbow_path_entry.grid(row=12, column=1, padx=entry_padx, pady=5, sticky="w")
-            rainbow_buttons_container.grid(row=12, column=2, columnspan=2, padx=5, pady=5, sticky="w")
-
-    # Trigger field update on change
-    attack_method_var.trace_add("write", show_attack_fields)
-
-    # Register the validation function
-    vcmd = (root.register(validate_non_negative_integer), "%P")
-
-    # Guess per Second Entry
-    tk.Label(form_frame, text="Guess/sec:", anchor="w").grid(row=13, column=0, padx=label_padx, pady=pady, sticky="w")
-    guess_sec_entry = tk.Entry(form_frame, width=30, validate="key", validatecommand=vcmd)
-    guess_sec_entry.insert(0, str(guess_per_sec))  # Pre-fill with existing value
-    guess_sec_entry.grid(row=13, column=1, padx=entry_padx, pady=pady, sticky="w")
-
-    ui_context = {
-        "event": None,
-        "parent_window": add_password_window,
-        "entry_password": entry_password,
-        "password_strength_label": password_strength_label,
-        "selected_aes_bit": selected_aes_bit,
-        "attack_method_var": attack_method_var,
-        "dict_path_entry": dict_path_entry,
-        "rainbow_path_entry": rainbow_path_entry,
-        "guess_sec_entry": guess_sec_entry,
-        "form_frame": form_frame,
-        "mp_reprompt_var": mp_reprompt_var  # Added to context
-    }
-    
-    guess_sec_entry.bind("<KeyRelease>", lambda event: update_password_strength(ui_context))
-
-    # Configure Guess Rate Button 
-    config_guess_rate_button = tk.Button(
-        form_frame, 
-        text="Configure", 
-        bg="#2196F3", 
-        fg="white", 
-        command=lambda: open_guess_rate_window(add_password_window, guess_sec_entry)
-    )
-    config_guess_rate_button.grid(row=13, column=2, padx=5, pady=pady, sticky="w")
-
-    # Bind both hover color and tooltip
-    config_guess_rate_button.bind(
-        "<Enter>", 
-        lambda e: (on_hover_browse(e, config_guess_rate_button), show_tooltip(config_guess_rate_button, "Configure guess rate settings"))
-    )
-    config_guess_rate_button.bind(
-        "<Leave>", 
-        lambda e: (on_hover_browse(e, config_guess_rate_button), hide_tooltip())
-    )
-
-    # Initialize correct visibility
-    show_attack_fields()
-
-    def on_aes_bit_change(event, context):
-        context["selected_aes_bit"].set(int(event.widget.get()))
-        update_password_strength(context)
-
-    aes_bit_combobox.bind("<<ComboboxSelected>>", partial(on_aes_bit_change, context=ui_context))
-    attack_method_combobox.bind("<<ComboboxSelected>>", lambda event: update_password_strength(ui_context))
-    entry_password.bind("<KeyRelease>", lambda event: update_password_strength(ui_context))
-    
-    # Dropdown menu for Generate button
-    def show_generate_menu(event=None):
-        # Use the widget position instead of mouse event
-        x = generate_button.winfo_rootx()
-        y = generate_button.winfo_rooty() + generate_button.winfo_height()
-        generate_menu.post(x, y)
-        
-    # Generate Password Menu
-    generate_menu = tk.Menu(root, tearoff=0)
-    generate_menu.add_command(label="Generate Now", command=lambda: generate_now(ui_context))
-    generate_menu.add_command(label="Setup Password Generation", command=lambda: open_password_generation_form(add_password_window))
-    
-    # Load Generate Password Icon
-    generate_icon = tk.PhotoImage(file="Images/generate_password_b.png").subsample(3, 3)
-
-    # Generate Password Button
-    generate_button = tk.Button(
-        password_buttons_container,
-        image=generate_icon,
-        bg="#f0f0f0",
-        relief="flat",
-        cursor="hand2",
-        command=lambda: show_generate_menu()
-    )
-    generate_button.pack(side="left", padx=(0, 5))
-    generate_button.image = generate_icon
-    generate_button.bind("<Enter>", lambda e: show_tooltip(e.widget, "Generate a secure password"))
-    generate_button.bind("<Leave>", lambda e: hide_tooltip())
-
-    # OK & Cancel Buttons - Centered
-    button_frame = tk.Frame(add_password_window, bg="#f0f0f0")
-    button_frame.pack(pady=20)
-
-    # Save paths and AES bits to database when the password is saved
-    def save_attack_settings():
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE attack_settings SET dictionary_path = ?, rainbow_table_path = ?",
-                    (dict_path_entry.get(), rainbow_path_entry.get()))
-        conn.commit()
-        conn.close()
-
-    # OK Button
-    def add_password_action():
-        platform_name = entry_platform_name.get()
-        platform_label_value = platform_label.get()
-        username = entry_username.get()
-        password = entry_password.get()
-        confirm_password = entry_confirm_password.get()
-        aes_bits = selected_aes_bit.get()
-        url = entry_url.get()
-        notes = entry_notes.get("1.0", tk.END).strip()
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        mp_reprompt = mp_reprompt_var.get()  # Get the checkbox value
-        save_attack_settings()
-
-        # Check if passwords match
-        if password != confirm_password:
-            messagebox.showwarning("Password Mismatch", "The passwords do not match.")
-            add_password_window.lift()
-            add_password_window.focus()
-            return
-
-        if all([
-            is_valid_input(platform_name),
-            is_valid_input(platform_label_value),
-            is_valid_input(username),
-            is_valid_input(password)
-        ]):
-            try:
-                encrypted_password = encrypt_things(password, key)
-                
-                conn = sqlite3.connect(DB_FILE)
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO passwords (
-                        platformName, platformLabel, platformUser, encryptedPassword,
-                        platformURL, platformNote, createdAt, updatedAt, aes_bits, mp_reprompt
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    platform_name.strip(), platform_label_value.strip(), username.strip(),
-                    encrypted_password, url.strip(), notes.strip(), current_time, current_time,
-                    aes_bits, mp_reprompt
-                ))
-                conn.commit()
-                conn.close()
-                
-                messagebox.showinfo("Success", "Password added successfully!")
-                add_password_window.destroy()
-                load_passwords()
-            
-            except Exception as e:
-                messagebox.showerror("Error", f"An error occurred: {str(e)}")
-                add_password_window.lift()
-                add_password_window.focus()
-        else:
-            messagebox.showwarning("Input Error", "Please fill in all required fields correctly.")
-            add_password_window.lift()
-            add_password_window.focus()
-            
-    ok_button = tk.Button(button_frame, text="OK", font=("Arial", 10, "bold"), bg="#4CAF50", fg="white", padx=20, pady=5, relief="raised", command=add_password_action)
-    ok_button.grid(row=0, column=0, padx=10, sticky="w")
-    ok_button.bind("<Enter>", lambda event: on_hover(event, ok_button, "#388E3C", "#4CAF50"))
-    ok_button.bind("<Leave>", lambda event: on_hover(event, ok_button, "#388E3C", "#4CAF50"))
-
-    # Highlight OK button as default
-    ok_button.config(default="active")  
-    add_password_window.bind("<Return>", lambda event: add_password_action())  # Pressing Enter triggers OK
-    
-    # Cancel Button
-    cancel_button = tk.Button(button_frame, text="Cancel", font=("Arial", 10, "bold"), bg="#f44336", fg="white", padx=20, pady=5, relief="raised", command=add_password_window.destroy)
-    cancel_button.grid(row=0, column=1, padx=10, sticky="w")
-    cancel_button.bind("<Enter>", lambda event: on_hover(event, cancel_button, "#d32f2f", "#f44336"))
-    cancel_button.bind("<Leave>", lambda event: on_hover(event, cancel_button, "#d32f2f", "#f44336"))
-
-    # Set focus to OK button
-    ok_button.focus_set()
-
-    update_password_strength(ui_context)
-
 # Function to show context menu for home items
-def show_item_context_menu(event, item_id, root):
-    global selected_item_id, sqlite_obj
-    selected_item_id = item_id
+def show_item_context_menu(event, password_id, root):
+    global selected_password_id, sqlite_obj
+    selected_password_id = password_id
     
     # Find the item frame to select
     for widget in items_container.winfo_children():
-        if hasattr(widget, 'password_id') and widget.password_id == item_id:
-            select_item(None, item_id, widget, root)
+        if hasattr(widget, 'password_id') and widget.password_id == password_id:
+            select_item(None, password_id, widget, root)
             break
     
     # Check if item is in trash
@@ -2837,7 +2403,7 @@ def show_item_context_menu(event, item_id, root):
         
         if result[1]:
             for row in result[1]:
-                if int(row[0]) == item_id:
+                if int(row[0]) == password_id:
                     # Retrieve the 'isDeleted' value from the result
                     is_deleted = row[12]
         else:
@@ -2869,27 +2435,27 @@ def show_item_context_menu(event, item_id, root):
     context_menu.post(event.x_root, event.y_root)
 
 def restore_selected_home_entry(root):
-    global selected_item_id, sqlite_obj
-    if not selected_item_id:
+    global selected_password_id, sqlite_obj
+    if selected_password_id is None:
         messagebox.showinfo("Info", "No item selected")
         return
     
     # Restore entry
     try:
         # Perform the update using sqlite_obj
-        sqlite_obj.updateInTable("passwords", selected_item_id , "isDeleted" , 'False' , commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", selected_item_id , "deletedAt" , '' , commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", selected_password_id , "isDeleted" , 'False' , commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", selected_password_id , "deletedAt" , '' , commit = True , raiseError = True)
         messagebox.showinfo("Success", "Entry restored")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to restore entry: {e}")
 
     # Refresh the view
-    selected_item_id = None
+    selected_password_id = None
     show_home_content(root)
 
 def delete_permanently_selected_home_entry(root):
-    global selected_item_id, sqlite_obj
-    if not selected_item_id:
+    global selected_password_id, sqlite_obj
+    if selected_password_id is None:
         messagebox.showinfo("Info", "No item selected")
         return
 
@@ -2901,19 +2467,19 @@ def delete_permanently_selected_home_entry(root):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     try:
-        sqlite_obj.deleteDataInTable("passwords", selected_item_id , commit = True , raiseError = True , updateId = True)
+        sqlite_obj.deleteDataInTable("passwords", selected_password_id , commit = True , raiseError = True , updateId = True)
         messagebox.showinfo("Success", "Entry permanently deleted")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to delete entry: {e}")
 
     # Refresh the view
-    selected_item_id = None
+    selected_password_id = None
     show_home_content(root)
 
 # Function to copy item values using sqlite_obj
 def copy_item_value(field, root):
-    global selected_item_id, sqlite_obj
-    if not selected_item_id:
+    global selected_password_id, sqlite_obj
+    if selected_password_id is None:
         messagebox.showinfo("Info", "No item selected")
         return
 
@@ -2928,7 +2494,7 @@ def copy_item_value(field, root):
         if result[1]:
             for row in result[1]:
                 print(row[0])
-                if int(row[0]) == selected_item_id:
+                if int(row[0]) == selected_password_id:
                     # Retrieve the item details
                     detail = row
                     break
@@ -2980,11 +2546,17 @@ def is_clipboard_history_enabled():
         # Clipboard history disabled or not found
         return False
 
-def copy_value(value, root):
+
+previous_info_window = None
+current_countdown_id = None
+
+def copy_value(value, root):  
+    global previous_info_window, current_countdown_id
+    
     try:
         # Check if clipboard history is enabled
         clipboard_history_enabled = is_clipboard_history_enabled()
-        
+
         # Temporarily disable clipboard history if needed
         if clipboard_history_enabled:
             # PowerShell script to disable clipboard history
@@ -3011,7 +2583,7 @@ def copy_value(value, root):
                 print(error.decode())
 
             time.sleep(1)  # Add a small delay to ensure the setting takes effect
-        
+
         # Open the clipboard
         win32clipboard.OpenClipboard()
         # Clear the clipboard
@@ -3020,18 +2592,71 @@ def copy_value(value, root):
         win32clipboard.SetClipboardText(value, win32clipboard.CF_UNICODETEXT)
         # Close the clipboard
         win32clipboard.CloseClipboard()
-        messagebox.showinfo("Copied", "Value copied to clipboard!")
+
+        # Custom messagebox using Toplevel window
+        def close_window():
+            global previous_info_window
+            if previous_info_window:
+                previous_info_window.destroy()  # Close the previous info_window if it exists
+            info_window.destroy()  # Close the current info_window when OK is clicked
+            previous_info_window = None  # Reset the reference
+
+        # Create a custom Toplevel window to show the "Copied" message
+        info_window = tk.Toplevel(root)
+        info_window.title("Copied")
+        info_window.configure(bg="#f0f0f0")
+
+        # Set window size and position it in the center of the screen
+        window_width = 300
+        window_height = 120
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        position_top = int(screen_height / 2 - window_height / 2)
+        position_left = int(screen_width / 2 - window_width / 2)
+        info_window.geometry(f"{window_width}x{window_height}+{position_left}+{position_top}")
+
+        # Label to display message
+        message_label = tk.Label(info_window, text="Value copied to clipboard!", font=("Arial", 12), bg="#f0f0f0")
+        message_label.pack(pady=20)
+
+        # OK Button to close the messagebox with better styling
+        ok_button = tk.Button(info_window, text="OK", command=close_window, font=("Arial", 10, "bold"),
+                              relief="raised", bg="#4CAF50", fg="white", width=10, height=1)
+        ok_button.pack(pady=10)
+
+        # Focus on the OK button when the window is opened
+        ok_button.focus_set()
+
+        # Bind the window to close when it loses focus (click outside)
+        info_window.bind("<FocusOut>", lambda event: close_window())
+
+        # Store the current info_window as the previous one
+        previous_info_window = info_window
+
+        # Auto-close the window after 5 seconds (5000 milliseconds)
+        info_window.after(5000, close_window)
+
+        # Start the countdown function
         countdown(int(settings[4]), clipboard_history_enabled, root)
-        
+
     except Exception as e:
         print(f"Error copying value: {e}")
         messagebox.showerror("Error", f"Failed to copy value: {e}")
-        
+
 def countdown(seconds, clipboard_history_enabled, root):
+    global current_countdown_id  # Access global countdown ID
+
+    # Cancel any ongoing countdown
+    if current_countdown_id is not None:
+        root.after_cancel(current_countdown_id)
+        current_countdown_id = None
+
     def update_countdown(remaining):
+        global current_countdown_id
         if remaining > 0:
             timer_label.config(text=f"Copied item will be cleared in {remaining} seconds...")
-            root.after(1000, update_countdown, remaining - 1)
+            # Store the new countdown ID
+            current_countdown_id = root.after(1000, update_countdown, remaining - 1)
         else:
             # Clear the clipboard
             try:
@@ -3061,41 +2686,51 @@ def countdown(seconds, clipboard_history_enabled, root):
                     else:
                         print("Error executing PowerShell script.")
                         print(error.decode())
-
+                
                 timer_label.config(text="Clipboard cleared")
-                # Schedule clearing of the message after 3 seconds
+                # Clear message after 3 seconds
                 root.after(3000, lambda: timer_label.config(text=""))
-
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to clear clipboard: {e}")
+            finally:
+                current_countdown_id = None  # Reset countdown ID
 
     update_countdown(seconds)
 
 # Delete entry for home content
-def delete_selected_home_entry(root):
-    global selected_item_id, sqlite_obj
-    if not selected_item_id:
+def delete_selected_home_entry(root): 
+    global selected_password_id, sqlite_obj
+    
+    if selected_password_id is None:
         messagebox.showinfo("Info", "No item selected")
         return
+    
+    # Show confirmation dialog
+    confirm_delete = messagebox.askyesno(
+        "Confirm Deletion", 
+        "Are you sure you want to delete this entry? This action cannot be undone."
+    )
+    
+    if not confirm_delete:
+        return  # User canceled the deletion
     
     # Now soft-delete the entry using sqlite_obj
     try:
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Perform the update
-        sqlite_obj.updateInTable("passwords", selected_item_id , "isDeleted" , 'True' , commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", selected_item_id , "deletedAt" , current_time , commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", selected_password_id , "isDeleted" , 'True' , commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", selected_password_id , "deletedAt" , current_time , commit = True , raiseError = True)
         messagebox.showinfo("Success", "Entry moved to trash")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to delete entry: {e}")
     
     # Refresh the view
-    selected_item_id = None
+    selected_password_id = None
     show_home_content(root)
 
 def select_item(e, id, item_frame, root):
-    global selected_item_widget, details_placeholder, selected_item_id, unsaved_changes
-    selected_item_id = id
+    global selected_item_widget, details_placeholder, selected_password_id, unsaved_changes
 
     if not item_frame.winfo_exists():
         return
@@ -3112,7 +2747,7 @@ def select_item(e, id, item_frame, root):
 
     item_frame.config(bg="#e0f7fa")
     selected_item_widget = item_frame
-    selected_item_id = id
+    selected_password_id = id
 
     # Remove details placeholder
     details_placeholder.destroy()
@@ -3123,13 +2758,19 @@ unsaved_changes = False
 
 # Global variable declaration
 item_context_menu = None
-selected_item_id = None
+selected_password_id = None
+
+# Function to truncate text with ellipses
+def truncate_text(text, max_length=20):
+    if len(text) > max_length:
+        return text[:max_length-3] + "..."
+    return text
 
 def show_home_content(root):
     global sqlite_obj   
     global unsaved_changes, timer_label, selected_item_frame, selected_item_widget, items_container, details_placeholder, main_frame
-    global selected_item_id  # Add this
-    selected_item_id = None  # Reset selected item ID
+    global selected_password_id  # Add this
+    selected_password_id = None  # Reset selected item ID
     selected_item_widget = None  # Track selected widget
     unsaved_changes = False
 
@@ -3178,15 +2819,23 @@ def show_home_content(root):
         search_icon = None
 
     # Create main container
-    main_container = tk.Frame(main_frame, bg="#f0f0f0")
+    main_container = tk.Frame(main_frame, bg="#f4f4f9")
     main_container.pack(fill=tk.BOTH, expand=True)
     main_container.config(width=root.winfo_width(), height=root.winfo_height() - 70)  # Dynamically update container size
     main_container.pack_propagate(False)  # Prevent the frame from resizing to fit its contents
 
-    # Sidebar frame - MODIFIED: added expand=True and changed fill to BOTH
-    sidebar_frame = tk.Frame(main_container, width=200, bg="#2c3e50", bd=1, relief=tk.SOLID)
+    # Sidebar frame
+    sidebar_frame = tk.Frame(main_container, width=200, bg="#2c3e50")
     sidebar_frame.pack(side=tk.LEFT, fill=tk.BOTH)
 
+    # Bottom border frame setup - Use this or bd=1, relief=tk.SOLID at tk.Frame
+    bottom_border_frame = tk.Frame(sidebar_frame, bg="black", height=1)  # Black bottom border
+    bottom_border_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+    # Right border frame setup
+    right_border_frame = tk.Frame(sidebar_frame, bg="black", height=1)  # Black bottom border
+    right_border_frame.pack(side=tk.RIGHT, fill=tk.Y)
+    
     # Content frame - already good
     content_frame = tk.Frame(main_container, bg="#f0f0f0")
     content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -3235,7 +2884,7 @@ def show_home_content(root):
             widget.destroy()
         
         selected_item_widget = None
-        selected_item_id = None
+        selected_password_id = None
         for child in details_frame.winfo_children():
             if isinstance(child, tk.Frame) and child.winfo_height() == 50:
                 child.destroy()
@@ -3260,7 +2909,7 @@ def show_home_content(root):
             if result[1]:
                 for row in result[1]:
                     # Extract columns: 
-                    item_id = int(row[0])
+                    password_id = int(row[0])
                     platform_name = row[1]
                     platform_label = row[2]
                     platform_user = row[3]
@@ -3271,7 +2920,7 @@ def show_home_content(root):
                         search_query in platform_label.lower() or
                         search_query in platform_user.lower() or
                         search_query in updated_at.lower()):
-                        passwords.append((item_id, platform_name, platform_user, updated_at, platform_label))
+                        passwords.append((password_id, platform_name, platform_label, platform_user, updated_at))
             
             # Sort by platform name
             passwords.sort(key=lambda x: x[1].lower())
@@ -3305,8 +2954,20 @@ def show_home_content(root):
         add_button.pack(side=tk.RIGHT, padx=10)
     
     # Items list frame setup - MODIFIED: added expand=True
-    items_list_frame = tk.Frame(content_frame, bg="#ffffff", bd=1, relief=tk.SOLID)
+    items_list_frame = tk.Frame(content_frame, bg="#ffffff")
     items_list_frame.pack(side=tk.LEFT, fill=tk.BOTH)
+
+    # Top border frame setup
+    top_border_frame = tk.Frame(items_list_frame, bg="black", height=1)  # Black bottom border
+    top_border_frame.pack(side=tk.TOP, fill=tk.X)
+
+    # Bottom border frame setup
+    bottom_border_frame = tk.Frame(items_list_frame, bg="black", height=1)  # Black bottom border
+    bottom_border_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+    # Right border frame setup
+    right_border_frame = tk.Frame(items_list_frame, bg="black", height=1)  # Black bottom border
+    right_border_frame.pack(side=tk.RIGHT, fill=tk.Y)
 
     # Details frame setup - MODIFIED: added expand=True
     global details_frame
@@ -3330,7 +2991,7 @@ def show_home_content(root):
 
     # Function to filter items
     def filter_items(filter_type=None, filter_value=None):
-        global unsaved_changes, selected_item_widget, selected_item_id, details_placeholder
+        global unsaved_changes, selected_item_widget, selected_password_id, details_placeholder
         
         # Check for unsaved changes before proceeding
         if unsaved_changes and not confirm_discard_changes():
@@ -3341,7 +3002,7 @@ def show_home_content(root):
         
         # Reset selection
         selected_item_widget = None
-        selected_item_id = None
+        selected_password_id = None
         
         # Clear existing items
         for widget in items_container.winfo_children():
@@ -3405,53 +3066,56 @@ def show_home_content(root):
             # Display filtered items
             for row in passwords:
                 # Extract needed fields: id, platformName, platformUser, updatedAt, platformLabel
-                item_id = int(row[0])
+                password_id = int(row[0])
                 platform_name = row[1]
                 label = row[2]  
                 username = row[3] 
                 modified = row[8]  
 
-                create_item_widget(item_id, platform_name, label, username, modified)
+                create_item_widget(password_id, platform_name, label, username, modified)
 
-    def create_item_widget(id, platform, label, username, modified):
+    def create_item_widget(password_id, platform, label, username, modified):  
         item_frame = tk.Frame(items_container, bg="#ffffff", bd=1, relief=tk.RIDGE)
         item_frame.pack(fill=tk.BOTH, pady=0, padx=0, anchor="w")
-        item_frame.password_id = id
+        item_frame.password_id = password_id
 
         content = tk.Frame(item_frame, bg="#ffffff")
-        content.pack(fill=tk.BOTH, padx=10, pady=10)
+        content.pack(fill=tk.BOTH, padx=5, pady=15)
 
         if label:
             try:
                 label_color = get_label_color(label)
                 tag = tk.Label(content, text=label, bg=label_color, fg="white",
-                             font=("Arial", 8), padx=3, bd=1, relief=tk.RAISED)
+                            font=("Arial", 8), padx=5, bd=1, relief=tk.RAISED)
                 tag.pack(anchor="w")
             except Exception as e:
                 print(f"Error creating label: {e}")
 
-        platform_label = tk.Label(content, text=platform, bg="#ffffff",
-                                font=("Arial", 10), anchor="w")
+        # Set a minimum and maximum width for the platform label
+        platform_label = tk.Label(content, text=truncate_text(platform), bg="#ffffff",
+                                font=("Arial", 10), anchor="w", width=17)
         platform_label.pack(fill=tk.X)
 
         user_mod_frame = tk.Frame(content, bg="#ffffff")
         user_mod_frame.pack(fill=tk.X, padx=0)
 
-        user_label = tk.Label(user_mod_frame, text=username, bg="#ffffff", fg="#666666", 
-                            font=("Arial", 9), anchor="w", justify="left")
+        # Set minimum and maximum width for the user label
+        user_label = tk.Label(user_mod_frame, text=truncate_text(username), bg="#ffffff", fg="#666666", 
+                            font=("Arial", 9), anchor="w", justify="left", width=17)
         user_label.pack(fill=tk.X, anchor="w")
 
-        mod_label = tk.Label(user_mod_frame, text=modified, bg="#ffffff", fg="#999999", 
-                           font=("Arial", 8), anchor="w", justify="left")
+        # Set minimum and maximum width for the modified label
+        mod_label = tk.Label(user_mod_frame, text=truncate_text(modified), bg="#ffffff", fg="#999999", 
+                            font=("Arial", 8), anchor="w", justify="left", width=17)
         mod_label.pack(fill=tk.X, anchor="w")
-       
-       # Make entire item clickable and right-clickable
+
+        # Make the entire item clickable and right-clickable
         for widget in [item_frame, content, platform_label, user_mod_frame, user_label, mod_label]:
-            widget.bind("<Button-1>", lambda e, id=id, frame=item_frame: select_item(e, id, frame, root))
-            widget.bind("<Button-3>", lambda e, id=id: show_item_context_menu(e, id, root))
+            widget.bind("<Button-1>", lambda e, password_id=password_id, frame=item_frame: select_item(e, password_id, frame, root))
+            widget.bind("<Button-3>", lambda e, password_id=password_id: show_item_context_menu(e, password_id, root))
             if widget not in [item_frame, content]:  # Don't change cursor for container frames
                 widget.config(cursor="hand2")
-            
+      
     # Create sidebar filter buttons
     def create_filter_button(parent, text, command, is_header=False):
         if is_header:
@@ -4224,12 +3888,52 @@ def confirm_discard_changes():
         icon='warning'
     )
 
+def is_valid_input(text, max_length=255, required=True):  
+    """Basic sanitization check for input fields with a length limit. URL and Notes fields are not required."""
+    if required and not text.strip():
+        return False, f"Field is required and cannot be empty."
+    elif len(text.strip()) > max_length:
+        return False, f"Maximum length exceeded. Please keep it under {max_length} characters."
+    return True, ""
+
 def save_new_password(name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite):
     global sqlite_obj
-    # Validation logic
-    if not name or not label or not user or not password or not confirm_password:
-        messagebox.showerror("Error", "Please fill in all required fields")
-        return False  # Return False to prevent further actions
+
+    # Validate input fields with specific max lengths
+    is_valid, message = is_valid_input(name, 50)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Platform Name: {message}")
+        return False
+
+    is_valid, message = is_valid_input(label, 50)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Label: {message}")
+        return False
+
+    is_valid, message = is_valid_input(user, 50)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Username: {message}")
+        return False
+
+    is_valid, message = is_valid_input(password, 100)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Password: {message}")
+        return False
+
+    is_valid, message = is_valid_input(confirm_password, 100)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Confirm Password: {message}")
+        return False
+
+    is_valid, message = is_valid_input(url, 255, required=False)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid URL: {message}")
+        return False
+
+    is_valid, message = is_valid_input(notes, 512, required=False)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Notes: {message}")
+        return False
     
     # Validate that password and confirm password match
     if password != confirm_password:
@@ -4263,44 +3967,88 @@ def save_new_password(name, label, user, password, confirm_password, url, notes,
         # Perform the insertion using sqlite_obj
         sqlite_obj.insertIntoTable("passwords", insert_data, commit=True)
         messagebox.showinfo("Success", "Password saved successfully")
+        update_nav_bar_password_health()
         return True  # Return success to trigger show_home_content
     except Exception as e:
         messagebox.showerror("Database Error", f"Error saving password: {str(e)}")
         return False  # Return failure, prevent further actions
 
-def save_password_changes(password_id, name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite):
+def save_password_changes(password_id, name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite): 
     global sqlite_obj
-    # Validation logic
-    if not name or not label or not user or not password or not confirm_password:
-        messagebox.showerror("Error", "Please fill in all required fields")
-        return False  # Return False to prevent further actions
+
+    # Validate input fields with specific max lengths
+    is_valid, message = is_valid_input(name, 50)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Platform Name: {message}")
+        return False
+
+    is_valid, message = is_valid_input(label, 50)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Label: {message}")
+        return False
+
+    is_valid, message = is_valid_input(user, 50)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Username: {message}")
+        return False
+
+    is_valid, message = is_valid_input(password, 100)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Password: {message}")
+        return False
+
+    is_valid, message = is_valid_input(confirm_password, 100)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Confirm Password: {message}")
+        return False
+
+    is_valid, message = is_valid_input(url, 255, required=False)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid URL: {message}")
+        return False
+
+    is_valid, message = is_valid_input(notes, 512, required=False)
+    if not is_valid:
+        messagebox.showerror("Error", f"Invalid Notes: {message}")
+        return False
     
     # Validate that password and confirm password match
     if password != confirm_password:
         messagebox.showerror("Error", "Password and Confirm Password do not match")
         return False
     
+    # Ask for confirmation before saving changes
+    confirm_save = messagebox.askyesno(
+        "Confirm Save", 
+        "Are you sure you want to save these changes?"
+    )
+    
+    if not confirm_save:
+        return  # User canceled saving changes
+    
     # Encrypt the password before saving
     encrypted_password = encrypt_things(password, key, aes_bits)
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     try:
-        sqlite_obj.updateInTable("passwords", password_id , "platformName" , name, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , "platformLabel" , label, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , "platformUser" , user, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , "encryptedPassword" , encrypted_password, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , "platformURL" , url, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , "platformNote" , notes, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , "updatedAt" , current_time, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , "aes_bits" , aes_bits, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , "mp_reprompt" , mp_reprompt, commit = True , raiseError = True)
-        sqlite_obj.updateInTable("passwords", password_id , "isFavourite" , is_favourite, commit = True , raiseError = True)
+        sqlite_obj.updateInTable("passwords", password_id , "platformName" , name, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("passwords", password_id , "platformLabel" , label, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("passwords", password_id , "platformUser" , user, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("passwords", password_id , "encryptedPassword" , encrypted_password, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("passwords", password_id , "platformURL" , url, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("passwords", password_id , "platformNote" , notes, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("passwords", password_id , "updatedAt" , current_time, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("passwords", password_id , "aes_bits" , aes_bits, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("passwords", password_id , "mp_reprompt" , mp_reprompt, commit=True, raiseError=True)
+        sqlite_obj.updateInTable("passwords", password_id , "isFavourite" , is_favourite, commit=True, raiseError=True)
+        
         messagebox.showinfo("Success", "Password updated successfully")
+        update_nav_bar_password_health()
         return True  # Return success to trigger show_home_content
     except Exception as e:
         messagebox.showerror("Error", f"Failed to save changes: {str(e)}")
         return False  # Return failure, prevent further actions
-
+    
 def open_aes_evaluation_window(parent_window, current_password, aes_bit_var):
     global sqlite_obj
     eval_win = tk.Toplevel(parent_window)
@@ -4848,128 +4596,156 @@ def get_label_color(label):
     }
     return colors.get(label, "#95a5a6")  # Default color if label not found
 
-def show_password_health_content(root):
+# Function to identify password issues
+def identify_password_issues():
+    result = sqlite_obj.getDataFromTable("passwords", raiseConversionError=True, omitID=False)
+
+    if not result[0] or not result[1]:
+        return [], [], [], []
+
+    passwords = result[1]
+    passwords = [pwd for pwd in passwords if pwd[12] != 'True']  # Exclude deleted passwords
+
+    weak_passwords = []
+    old_passwords = []
+    reused_passwords = []
+    breached_passwords = []
+
+    decrypted_passwords = []
+    for pwd in passwords:
+        decrypted = decrypt_things(pwd[4], key, pwd[9])
+        decrypted_passwords.append(decrypted)
+
+    password_count = {}
+    for decrypted in decrypted_passwords:
+        password_count[decrypted] = password_count.get(decrypted, 0) + 1
+
+    current_time = datetime.now()
+
+    for i, pwd in enumerate(passwords):
+        decrypted_password = decrypted_passwords[i]
+
+        # Weak password check
+        if (len(decrypted_password) < 8 or 
+            not re.search(r"[A-Z]", decrypted_password) or 
+            not re.search(r"[a-z]", decrypted_password) or 
+            not re.search(r"[0-9]", decrypted_password)):
+            weak_passwords.append(pwd)
+
+        # Old password check
+        updated_at = datetime.strptime(pwd[8], "%Y-%m-%d %H:%M:%S")
+        if (current_time - updated_at).days > 365:
+            old_passwords.append(pwd)
+
+        # Reused password check
+        if password_count[decrypted_password] > 1:
+            reused_passwords.append(pwd)
+
+        # Breached password check
+        breach_msg, count, error = check_pwned_password(decrypted_password)
+        if not error and count is not None and count > 0:
+            breached_passwords.append(pwd)
+
+    return weak_passwords, old_passwords, reused_passwords, breached_passwords
+
+# Function to update the nav bar based on password issues (to be called from another thread)
+def update_nav_bar_password_health():
+    # Start the password check in a separate thread to avoid UI blocking
+    def check_and_update():
+        weak_passwords, old_passwords, reused_passwords, breached_passwords = identify_password_issues()
+
+        # Check if any issue exists
+        has_issues = any([weak_passwords, old_passwords, reused_passwords, breached_passwords])
+
+        # Update the nav bar label dynamically
+        if has_issues:
+            # Set the "Password Health" part to white and the "⚠️" to red
+            password_health_label.config(text="Password Health")
+            exclamation_label.config(text="⚠️", fg="#ff0000")  # Red color for exclamation mark
+        else:
+            password_health_label.config(text="Password Health", fg="white")  # Normal color for healthy state
+            exclamation_label.config(text="", fg="white")  # Remove the ⚠️ when no issues
+
+    # Run the check in a separate thread
+    threading.Thread(target=check_and_update, daemon=True).start()
+
+# Function to trigger periodic updates of the password health indicator
+def periodic_update_nav_bar_password_health(root):
+    update_nav_bar_password_health()  # Update password health
+
+    # Call this function again after 10 seconds (10000 milliseconds)
+    root.after(10000, periodic_update_nav_bar_password_health, root)
+
+def show_password_health_content(root): 
     global sqlite_obj
     toggle_scrollbar(True)
     toggle_scrolling(True, root)
 
-    # Function to display password health content
+    # Clear existing widgets in main_frame
     for widget in main_frame.winfo_children():
         if widget != timer_label:  # Do not destroy the timer label
             widget.destroy()
 
-    # Create a container frame that will center its contents
-    container = tk.Frame(main_frame, bg="#f0f0f0")
+    # Create a container frame with a modern look
+    container = tk.Frame(main_frame, bg="#f4f4f9")
     container.pack(fill=tk.BOTH, expand=True)
 
-    # Add your content to this container instead of main_frame directly
-    tk.Label(container, text="Password Health Checker", font=("Helvetica", 16, "bold")).pack(pady=10)
-    tk.Label(container, text="Identify weak, old or reused passwords. Click to take action now!").pack(pady=5)
-
-    # Function to identify weak, old, and reused passwords 
-    def identify_password_issues():
-        # Fetch all passwords using sqlite_obj
-        result = sqlite_obj.getDataFromTable(
-            "passwords",
-            raiseConversionError=True,
-            omitID=False
-        )
-        
-        if not result[0] or not result[1]:  # Check if query succeeded and has results
-            return [], [], [], []
-        
-        passwords = result[1]
-        
-        weak_passwords = []
-        old_passwords = []
-        reused_passwords = []
-        breached_passwords = []
-        
-        # Decrypt all passwords first
-        decrypted_passwords = []
-        for pwd in passwords:
-            decrypted = decrypt_things(pwd[4], key, pwd[9])
-            decrypted_passwords.append(decrypted)
-        
-        # Create a password count dictionary for reuse detection
-        password_count = {}
-        for decrypted in decrypted_passwords:
-            password_count[decrypted] = password_count.get(decrypted, 0) + 1
-        
-        current_time = datetime.now()
-        
-        for i, pwd in enumerate(passwords):
-            decrypted_password = decrypted_passwords[i]
-            
-            # Weak password check
-            if (len(decrypted_password) < 8 or 
-                not re.search(r"[A-Z]", decrypted_password) or 
-                not re.search(r"[a-z]", decrypted_password) or 
-                not re.search(r"[0-9]", decrypted_password)):
-                weak_passwords.append(pwd)
-            
-            # Old password check
-            updated_at = datetime.strptime(pwd[8], "%Y-%m-%d %H:%M:%S")
-            if (current_time - updated_at).days > 365:
-                old_passwords.append(pwd)
-            
-            # Reused password check
-            if password_count[decrypted_password] > 1:
-                reused_passwords.append(pwd)
-            
-            # Breached password check
-            breach_msg, count, error = check_pwned_password(decrypted_password)
-            if not error and count is not None and count > 0:
-                breached_passwords.append(pwd)
-
-        return weak_passwords, old_passwords, reused_passwords, breached_passwords
+    # Title with clean typography
+    tk.Label(container, text="Password Health Checker", font=("Helvetica", 18, "bold"), bg="#f4f4f9", fg="#333333").pack(pady=10)
+    tk.Label(container, text="Identify weak, old or reused passwords. Click to take action now!", font=("Helvetica", 12), bg="#f4f4f9", fg="#777777").pack(pady=3)
 
     weak_passwords, old_passwords, reused_passwords, breached_passwords = identify_password_issues()
 
-    # Function to show password entries
+    # Function to show password entries with a clean layout
     def show_entries(entries):
         for widget in main_frame.winfo_children():
             widget.destroy()
 
         # Back arrow to return to main menu
-        back_arrow = tk.Label(main_frame, text="←", font=("Helvetica", 14), cursor="hand2", bg="white")
-        back_arrow.pack(anchor="w", padx=10, pady=10)
+        back_arrow = tk.Label(main_frame, text="←", font=("Helvetica", 18), cursor="hand2", bg="#f4f4f9")
+        back_arrow.pack(anchor="w", padx=10, pady=5)
         back_arrow.bind("<Button-1>", lambda e: show_password_health_content(root))
 
-        # Display password entries
+        # Display password entries with modern design
         for entry in entries:
-            entry_frame = tk.Frame(main_frame, relief=tk.RAISED, borderwidth=2, bg="white")
-            entry_frame.config(width=350, height=100)  # Set a slightly larger fixed size
-            entry_frame.pack_propagate(False)  # Prevent resizing
-            entry_frame.pack(pady=10, padx=10)
+            entry_frame = tk.Frame(main_frame, relief=tk.RAISED, borderwidth=2, bg="#ffffff")
+            entry_frame.config(width=350, height=100)
+            entry_frame.pack_propagate(False)
+            entry_frame.pack(padx=10, pady=10)
 
-            # Create labels for platform details
-            platform_name = tk.Label(entry_frame, text=f"Platform: {entry[1]}", bg="white", anchor="w")
-            platform_name.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+            # Label for password type with modern color scheme
+            label_color = get_label_color(entry[2])
+            tag = tk.Label(entry_frame, text=entry[2], bg=label_color, fg="white", font=("Helvetica", 10), padx=5, bd=1, relief=tk.RAISED)
+            tag.grid(row=0, column=0, padx=10, pady=5, sticky="w")
 
-            platform_label = tk.Label(entry_frame, text=f"Label: {entry[2]}", bg="white", anchor="w")
-            platform_label.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+            # Platform label with aligned and easy-to-read font
+            platform_name = tk.Label(entry_frame, text=f"Platform: {truncate_text(entry[1])}", bg="white", anchor="w", width=25, font=("Helvetica", 11))
+            platform_name.grid(row=1, column=0, padx=10, pady=5, sticky="w")
 
-            platform_user = tk.Label(entry_frame, text=f"Username: {entry[3]}", bg="white", anchor="w")
-            platform_user.grid(row=2, column=0, padx=10, pady=5, sticky="w")
+            # Username label with soft color
+            user_label = tk.Label(entry_frame, text=f"Username: {truncate_text(entry[3])}", bg="white", fg="#666666", anchor="w", width=25, font=("Helvetica", 10))
+            user_label.grid(row=2, column=0, padx=10, pady=5, sticky="w")
 
-            # Buttons container to align them vertically
+            # Date modified with subtle design
+            date_modified = tk.Label(entry_frame, text=truncate_text(entry[8]), bg="white", fg="#999999", anchor="w", width=25, font=("Helvetica", 10))
+            date_modified.grid(row=3, column=0, padx=10, pady=5, sticky="w")
+
+            # Buttons container aligned nicely
             buttons_frame = tk.Frame(entry_frame, bg="white")
             buttons_frame.grid(row=0, column=1, rowspan=4, padx=10, pady=5, sticky="ns")
 
-            # Change Password button
+            # Change Password button with modern style
             change_button = tk.Button(buttons_frame, text="Change Password", 
-                                    command=lambda e=entry: change_password_from_health(e[0], root))
+                                    command=lambda e=entry: change_password_from_health(e[0], root), bg="#4CAF50", fg="white", font=("Helvetica", 10, "bold"))
             change_button.pack(pady=5, fill="x")
 
-            # Delete button
-            delete_button = tk.Button(buttons_frame, text="Delete", command=lambda e=entry: delete_selected_entry(e[0], root))
+            # Delete button with contrast color
+            delete_button = tk.Button(buttons_frame, text="Delete", command=lambda e=entry: delete_selected_entry(e[0], root), bg="#f44336", fg="white", font=("Helvetica", 10, "bold"))
             delete_button.pack(pady=5, fill="x")
 
-        # Ensure the layout is updated correctly after the entries are shown
         main_frame.update_idletasks()
 
-    # Sections for weak, old, reused and breached passwords
+    # Sections for weak, old, reused, and breached passwords with enhanced clarity
     sections = [
         ("Weak Passwords", len(weak_passwords), weak_passwords, "No weak passwords found.", "Weak passwords found. Click to view."),
         ("Old Passwords", len(old_passwords), old_passwords, "No old passwords found.", "Old passwords found. Click to view."),
@@ -4977,36 +4753,37 @@ def show_password_health_content(root):
         ("Breached Passwords", len(breached_passwords), breached_passwords, "No breached passwords found.", "Breached passwords found. Click to view.")
     ]
 
-    # Create a frame for sections
-    section_container = tk.Frame(container)
+    # Create a container for sections with uniform spacing
+    section_container = tk.Frame(container, bg="#f4f4f9")
     section_container.pack(pady=10, padx=20)
 
     for section in sections:
-        frame = tk.Frame(section_container, relief=tk.RAISED, borderwidth=2, bg="white", cursor="hand2")
-        frame.config(width=350, height=80)  # Set fixed size
-        frame.pack_propagate(False)  # Prevent resizing
-        frame.pack(pady=10, padx=10, fill="x")
+        cursor_type = "hand2" if section[1] > 0 else ""  # Set cursor to "hand2" only if there are passwords
+        frame = tk.Frame(section_container, relief=tk.RAISED, borderwidth=2, bg="white", cursor=cursor_type)
+        frame.config(width=350, height=80)
+        frame.pack_propagate(False)
+        frame.pack(pady=10, padx=10, fill="x", expand=True)
 
-        # Create a frame inside for content
+        # Content frame inside each section for modern layout
         content_frame = tk.Frame(frame, bg="white")
-        content_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        content_frame.pack(fill="both", expand=True, padx=12, pady=8)
 
         count_color = "green" if section[1] == 0 else "red"
-        count_label = tk.Label(content_frame, text=f"{section[1]}", font=("Helvetica", 14, "bold"), fg=count_color, bg="white")
-        count_label.pack(side=tk.TOP, pady=(5, 2))  # Top padding
+        count_label = tk.Label(content_frame, text=f"{section[1]}", font=("Helvetica", 16, "bold"), fg=count_color, bg="white")
+        count_label.pack(side=tk.TOP, pady=(6, 2))
 
         description = section[3] if section[1] == 0 else section[4]
         label = tk.Label(content_frame, text=description, font=("Helvetica", 12), bg="white")
-        label.pack(side=tk.TOP, pady=(2, 5))  # Bottom padding
+        label.pack(side=tk.TOP, pady=(2, 6))
 
-        # Right arrow aligned to the middle right side
-        arrow = tk.Label(frame, text="→", font=("Helvetica", 12), cursor="hand2", bg="white")
+        # Right arrow for action
+        arrow = tk.Label(frame, text="→", font=("Helvetica", 16), cursor="hand2", bg="white")
         if section[1] == 0:
-            arrow.place_forget()  # Hide the arrow if there are no issues
+            arrow.place_forget()  # Hide arrow if no passwords
         else:
-            arrow.place(relx=0.95, rely=0.5, anchor="e")  # Align to right-middle
+            arrow.place(relx=0.95, rely=0.5, anchor="e")
 
-        # Bind click event to the entire section (frame)
+        # Binding events for click actions
         if section[1] > 0:
             frame.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
             content_frame.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
@@ -5014,48 +4791,53 @@ def show_password_health_content(root):
             label.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
             arrow.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
 
-    # Switch to home content and show password details
     def change_password_from_health(password_id, root):
-        # First show the home content
         show_home_content(root)
-        
-        # Then show the password details for the selected ID
+        item_frame = None
+        for widget in items_container.winfo_children():
+            if hasattr(widget, 'password_id') and widget.password_id == password_id:
+                item_frame = widget
+                break
+
+        if item_frame:
+            root.after(100, lambda: select_item(None, password_id, item_frame, root))
         root.after(100, lambda: show_password_details(root, password_id))
 
 def delete_selected_entry(password_id, root):
     global sqlite_obj
     confirm = messagebox.askyesno("Delete Entry", "Are you sure you want to delete this entry?")
     if confirm:
+        # Now soft-delete the entry
         try:
-            # Delete the entry
-            sqlite_obj.deleteDataInTable("passwords", password_id, commit = True , raiseError = True , updateId = True)
-            
-            messagebox.showinfo("Success", "Password entry deleted successfully!")
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Perform the update
+            sqlite_obj.updateInTable("passwords", password_id , "isDeleted" , 'True' , commit = True , raiseError = True)
+            sqlite_obj.updateInTable("passwords", password_id , "deletedAt" , current_time , commit = True , raiseError = True)
+            messagebox.showinfo("Success", "Entry moved to trash in home page")
             show_password_health_content(root)  # Refresh the password list
         except Exception as e:
             messagebox.showerror("Error", f"Failed to delete entry: {e}")
         
-def show_settings_content(root):
+def show_settings_content(root): 
     global sqlite_obj
-    toggle_scrollbar(True)
-    toggle_scrolling(True, root)
+    toggle_scrollbar(False)
+    toggle_scrolling(False, root)
 
     # Function to display settings content
     for widget in main_frame.winfo_children():
         if widget != timer_label:  # Do not destroy the timer label
             widget.destroy()
 
-    # Add a placeholder to maintain height
-    placeholder = tk.Frame(nav_bar, width=30, height=30, bg="#333333")
-    placeholder.pack(side=tk.RIGHT, padx=10)
-
     # Create a container frame that will center its contents
-    container = tk.Frame(main_frame, bg="#f0f0f0")
-    container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    container = tk.Frame(main_frame, bg="#f4f4f9")
+    container.pack(fill=tk.BOTH, expand=True)
+    container.config(width=root.winfo_width() - 50, height=root.winfo_height() - 75)  # Dynamically update container size
+    container.pack_propagate(False)  # Prevent the frame from resizing to fit its contents
 
     # Create the sidebar and content area within the container
     sidebar = tk.Frame(container, width=220, bg="#f8f9fa", bd=1, relief="solid")
-    sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+    sidebar.pack(side=tk.LEFT, fill=tk.Y)
 
     # Add sidebar header
     sidebar_header = tk.Frame(sidebar, bg="#e9ecef", height=40)
@@ -5063,8 +4845,31 @@ def show_settings_content(root):
     tk.Label(sidebar_header, text="SETTINGS", font=("Helvetica", 12, "bold"), 
             bg="#e9ecef", fg="#495057").pack(pady=10)
 
-    content_area = tk.Frame(container, bg="white", bd=1, relief="solid")
-    content_area.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+    # Create a frame to hold both content and scrollbar
+    content_frame = tk.Frame(container, bd=1, relief="solid")
+    content_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+    
+    # Create canvas and scrollbar
+    canvas = tk.Canvas(content_frame, bg="white")
+    scrollbar = tk.Scrollbar(content_frame, orient="vertical", command=canvas.yview)
+    scrollable_frame = tk.Frame(canvas, bg="white")
+    
+    # Configure scroll region
+    scrollable_frame.bind(
+        "<Configure>",
+        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+    )
+    
+    # Add scrollable frame to canvas
+    canvas.create_window((0, 0), window=scrollable_frame, anchor="n")
+    canvas.configure(yscrollcommand=scrollbar.set)
+    
+    # Pack canvas and scrollbar
+    scrollbar.pack(side="right", fill="y")
+    canvas.pack(side="left", fill="both", expand=True)
+    
+    # Set content_area to the scrollable_frame for future content
+    content_area = scrollable_frame
 
     # Display initial message - centered in the content area
     initial_msg_frame = tk.Frame(content_area, bg="white")
@@ -5202,19 +5007,19 @@ def show_settings_content(root):
             qr_code_img = ImageTk.PhotoImage(qr_code)
             
             # Place the setup key before the QR code
-            tk.Label(settings_frame, text=f"Setup Key: {otp_secret}", font=("Helvetica", 12)).pack(pady=5)
+            tk.Label(settings_frame, text=f"Setup Key: {otp_secret}", font=("Helvetica", 10)).pack(pady=5)
             qr_label = tk.Label(settings_frame, image=qr_code_img)
             qr_label.image = qr_code_img
             qr_label.pack(pady=10)
             
             # Instructions for the user
             tk.Label(settings_frame, text="Use an authenticator app to scan the QR code or enter the setup key.", 
-                    font=("Helvetica", 11), wraplength=500, justify="left").pack(pady=5)
+                    font=("Helvetica", 9), wraplength=500, justify="left").pack(pady=5)
             
             # OTP entry field
             tk.Label(settings_frame, text="Enter the OTP code from your authenticator app:", 
-                    font=("Helvetica", 11)).pack(pady=10)
-            otp_entry = tk.Entry(settings_frame, font=("Helvetica", 14), justify="center")
+                    font=("Helvetica", 12)).pack(pady=10)
+            otp_entry = tk.Entry(settings_frame, font=("Helvetica", 10), justify="center")
             otp_entry.pack(pady=10)
             otp_entry.focus_set()  # Set focus to the entry field
 
@@ -5230,14 +5035,14 @@ def show_settings_content(root):
                     messagebox.showerror("Error", "OTP verification failed. MFA settings not saved.")
 
             verify_button = tk.Button(settings_frame, text="Verify and Save", 
-                                    font=("Helvetica", 11), command=verify_and_save)
+                                    font=("Helvetica", 9), command=verify_and_save)
             verify_button.pack(pady=10)
             
             # Bind the Enter key to the verify_and_save function
             otp_entry.bind('<Return>', lambda event: verify_and_save())
 
         def save_mfa_setting():
-            if settings[0] and mfa_var.get():  # MFA is already enabled
+            if settings[0] =='True' and mfa_var.get():  # MFA is already enabled
                 messagebox.showinfo("MFA Already Enabled", "MFA is already enabled and cannot be re-enabled.")   
                 return
 
@@ -5316,8 +5121,6 @@ def show_settings_content(root):
                         commit=True, 
                         raiseError=True
                     )
-            
-            messagebox.showinfo("Success", "Recovery keys updated successfully!")
 
         except Exception as e:
             print(f"Failed to save recovery keys: {e}")
@@ -6126,7 +5929,7 @@ def main():
             root.bind_all("<Key>", reset_timer)
 
             # Create a container frame that will hold both the nav bar and the scrollable content
-            container = tk.Frame(root)
+            container = tk.Frame(root, bg="#f4f4f9")
             container.pack(fill=tk.BOTH, expand=True)
 
             # Create a navigation bar as a Frame - packed in container, not root
@@ -6134,14 +5937,25 @@ def main():
             nav_bar = tk.Frame(container, bg="#333333", height=50)
             nav_bar.pack(side=tk.TOP, fill=tk.X)
 
+            # Add a placeholder to maintain height
+            placeholder = tk.Frame(nav_bar, width=30, height=30, bg="#333333")
+            placeholder.pack(side=tk.RIGHT, padx=10)
+
             # Navigation options
             home_label = tk.Label(nav_bar, text="Home", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
             home_label.pack(side=tk.LEFT, padx=10)
             home_label.bind("<Button-1>", lambda e: show_home_content(root))
 
+            # Password Health label with dynamic text and icon
+            global password_health_label, exclamation_label
             password_health_label = tk.Label(nav_bar, text="Password Health", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
-            password_health_label.pack(side=tk.LEFT, padx=10)
+            password_health_label.pack(side=tk.LEFT)
             password_health_label.bind("<Button-1>", lambda e: show_password_health_content(root))
+
+            # Exclamation mark (⚠️) label with dynamic red color
+            exclamation_label = tk.Label(nav_bar, text="", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
+            exclamation_label.pack(side=tk.LEFT)
+            exclamation_label.bind("<Button-1>", lambda e: show_password_health_content(root))
 
             settings_label = tk.Label(nav_bar, text="Settings", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
             settings_label.pack(side=tk.LEFT, padx=10)
@@ -6149,11 +5963,11 @@ def main():
 
             # Create a main frame with scrollbar - packed in container, below nav_bar
             global main_frame
-            main_container = tk.Frame(container, bg="#f0f0f0")
+            main_container = tk.Frame(container, bg="#f4f4f9")
             main_container.pack(fill=tk.BOTH, expand=True)
             
             # Create a canvas for scrolling
-            canvas = tk.Canvas(main_container, bg="#f0f0f0", highlightthickness=0)
+            canvas = tk.Canvas(main_container, bg="#f4f4f9", highlightthickness=0)
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             
             # Add scrollbar
@@ -6164,7 +5978,7 @@ def main():
             canvas.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
             
             # Create main frame inside the canvas
-            main_frame = tk.Frame(canvas, bg="#f0f0f0")
+            main_frame = tk.Frame(canvas, bg="#f4f4f9")
             canvas.create_window((0, 0), window=main_frame, anchor="nw")
 
             # Add this after creating the main_frame
@@ -6183,12 +5997,12 @@ def main():
             bind_to_mousewheel(main_frame)
 
             # Create a footer frame for the timer label
-            footer_frame = tk.Frame(container, bg="#f0f0f0" , height=40)
+            footer_frame = tk.Frame(container, bg="#f4f4f9", height=40)
             footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
             # Create a timer label inside the footer frame
             global timer_label
-            timer_label = tk.Label(footer_frame, text="", bg="#f0f0f0", font=("Arial", 10))
+            timer_label = tk.Label(footer_frame, text="", bg="#f4f4f9", font=("Arial", 10))
             timer_label.pack(side=tk.BOTTOM, padx=10, pady=5)
 
             # Reset the last activity time after successful login
@@ -6208,6 +6022,9 @@ def main():
 
             # Start checking for inactivity
             check_inactivity(root)
+
+            # Check for password issues and update the nav bar
+            periodic_update_nav_bar_password_health(root)
 
             # Start the main event loop
             root.mainloop()
