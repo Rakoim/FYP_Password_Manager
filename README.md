@@ -38,8 +38,8 @@ To use the Rainbow Table attack, you will need **BitTorrent Web**:
 - Download the **MD5 hash rainbow tables** from the available options. The system by default uses the **"mixalpha-numeric-symbol32-space#1-7"** rainbow table, which supports password lengths from 1 to 7 characters and includes lowercase, uppercase, digits, and special characters.
 
 **Recommended Download:**
-- **File Size**: **86 GB** (3 parts: Part 1, Part 2, Part 3).
-- To download, click on **Part 1**, **Part 2**, and **Part 3** to get the `.torrent` files.
+- **File Size**: **86 GB** (4 parts: Part 0, Part 1, Part 2, Part 3).
+- To download, click on **Part 0**, **Part 1**, **Part 2**, and **Part 3** to get the `.torrent` files.
 
 ### 6. Open .torrent Files in BitTorrent Web
 - Once the `.torrent` files are downloaded, navigate to the folder where they are located.
