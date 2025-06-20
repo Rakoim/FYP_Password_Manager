@@ -44,12 +44,19 @@ import multiprocessing as mp
 from functools import partial
 from collections import Counter
 import tracemalloc
+import win32event
+import win32api
+import winerror
 
 # Constants
 DB_FILE = "passwords.db"
 
 # Global variable to track the last activity time
 last_activity_time = time.time()
+
+# Add these global variables at the top
+inactivity_after_id = None
+password_health_after_id = None
 
 # Function to display setup welcome window before database creation
 def initial_setup():
@@ -158,9 +165,23 @@ def ask_master_password(root):
             return master_password
 
 def on_closing(root):
+    global inactivity_after_id, password_health_after_id, current_countdown_id
+    
     if messagebox.askokcancel("Quit", "Do you want to quit?"):
+        # Cancel all scheduled tasks
+        if inactivity_after_id:
+            root.after_cancel(inactivity_after_id)
+        if password_health_after_id:
+            root.after_cancel(password_health_after_id)
+        if current_countdown_id:
+            root.after_cancel(current_countdown_id)
+        
+        # Proper termination sequence
+        root.quit()
         root.destroy()
-        exit()
+        
+        # Force exit all threads
+        os._exit(0)  # Use instead of sys.exit()
 
 # Function to derive key from master password using PBKDF2
 def derive_key(master_password, salt):
@@ -454,7 +475,7 @@ def setup_database():
     if not result[1]:  # If there are no rows in the table
         sqlite_obj.insertIntoTable(
             "settings",
-            [False, True, False, 3000, 10, "", "./Backup"],
+            [False, True, False, 3500, 10, "", "./Backup"],
             commit=True
         )
 
@@ -497,37 +518,37 @@ def setup_database():
     if not result[1]:  # If there are no rows in the table
         sqlite_obj.insertIntoTable(
             "rainbow_crack_time",
-            [1, 0.001],
+            [1, 323.77],
             commit=True
         )
         sqlite_obj.insertIntoTable(
             "rainbow_crack_time",
-            [2, 0.001],
+            [2, 388.49],
             commit=True
         )        
         sqlite_obj.insertIntoTable(
             "rainbow_crack_time",
-            [3, 0.01],
+            [3, 237.52],
             commit=True
         )        
         sqlite_obj.insertIntoTable(
             "rainbow_crack_time",
-            [4, 0.1],
+            [4, 268.34],
             commit=True
         )       
         sqlite_obj.insertIntoTable(
             "rainbow_crack_time",
-            [5, 1.0],
+            [5, 1748.55],
             commit=True
         )        
         sqlite_obj.insertIntoTable(
             "rainbow_crack_time",
-            [6, 10.0],
+            [6, 1750],
             commit=True
         )
         sqlite_obj.insertIntoTable(
             "rainbow_crack_time",
-            [7, 60.0],
+            [7, 1750],
             commit=True
         )
 
@@ -550,15 +571,15 @@ def reset_timer(event=None):
     last_activity_time = time.time()
 
 def check_inactivity(root):
-    global last_activity_time
+    global last_activity_time, inactivity_after_id
     current_time = time.time()
     inactivity_period = current_time - last_activity_time
 
-    if inactivity_period > int(settings[3]):  # settings[3] is the autologout time in seconds
+    if inactivity_period > int(settings[3]):
         lock_system(root)
 
-    # Pass the function reference, not the function call
-    root.after(1000, lambda: check_inactivity(root))  # Check every second
+    # Store the after ID
+    inactivity_after_id = root.after(1000, lambda: check_inactivity(root))
 
 def lock_system(root):
     # Destroy existing main window if it exists
@@ -1257,9 +1278,9 @@ def open_guess_rate_window(parent_window, guess_sec_entry):
             chunks = [alphabet[i * chunk_size:(i + 1) * chunk_size] for i in range(thread_count - 1)]
             chunks.append(alphabet[(thread_count - 1) * chunk_size:])
 
-            def brute_force(limit, chunk, pwd, stop_flag):
+            def brute_force(limit, chunk, pwd, attack_stop_flag):
                 for guesses, g in enumerate(itertools.product(chunk, repeat=len(pwd)), 1):
-                    if stop_flag and stop_flag.is_set():
+                    if attack_stop_flag and attack_stop_flag.is_set():
                         return
                     if ''.join(g) == pwd:
                         message_queue.put(f"🔓 Password cracked: '{''.join(g)}'")
@@ -1455,49 +1476,51 @@ def estimate_crack_time(password, aes_bits, method, dictionary_path, rainbow_pat
     else:
         results["Dictionary Attack"] = "Dictionary attack disabled"
 
-    # — Rainbow Table — 
+    # — Rainbow Table —
     if method == "Rainbow Table":
-        # Rainbow table time estimation
         try:
-            # Get base_time from rainbow_crack_time
-            rainbow_result = sqlite_obj.getDataFromTable(
-                "rainbow_crack_time", 
-                raiseConversionError=True,
-                omitID=True
-            )
-            
-            base_time = None
-            if rainbow_result[1]:
-                for row in rainbow_result[1]:
-                    if int(row[0]) == len(password):  # First column is length
-                        base_time = row[1]       # Second column is base_time
-                        break
-                    
-            if base_time is None:
-                results["Rainbow Table"] = "No estimate for this password length"
+            # Check if the directory exists and contains .rti2 files
+            if not os.path.exists(rainbow_path) or not any(file.endswith('.rti2') for file in os.listdir(rainbow_path)):
+                results["Rainbow Table"] = "No valid rainbow table (.rti2) files found in the specified directory."
             else:
-                # Get thread_count from attack_settings
-                attack_result = sqlite_obj.getDataFromTable(
-                    "attack_settings",
+                # Continue with the rainbow table time estimation logic
+                rainbow_result = sqlite_obj.getDataFromTable(
+                    "rainbow_crack_time", 
                     raiseConversionError=True,
                     omitID=True
                 )
-                
-                threads = 1
-                if attack_result[1]:
-                    try:
-                        # Thread count is 4th column (index 3)
-                        threads = max(1, int(attack_result[1][0][3]))
-                    except (TypeError, ValueError):
-                        pass  # Keep default value if conversion fails
 
-                adjusted_time = base_time / threads
-                crack_time = format_time(adjusted_time)
-                results["Rainbow Table"] = crack_time
+                base_time = None
+                if rainbow_result[1]:
+                    for row in rainbow_result[1]:
+                        if int(row[0]) == len(password):  # First column is length
+                            base_time = row[1]  # Second column is base_time
+                            break
+
+                if base_time is None:
+                    results["Rainbow Table"] = "No estimate for this password length"
+                else:
+                    # Get thread_count from attack_settings
+                    attack_result = sqlite_obj.getDataFromTable(
+                        "attack_settings",
+                        raiseConversionError=True,
+                        omitID=True
+                    )
+
+                    threads = 1
+                    if attack_result[1]:
+                        try:
+                            # Thread count is 4th column (index 3)
+                            threads = max(1, int(attack_result[1][0][3]))
+                        except (TypeError, ValueError):
+                            pass  # Keep default value if conversion fails
+
+                    adjusted_time = base_time / threads
+                    crack_time = format_time(adjusted_time)
+                    results["Rainbow Table"] = crack_time
 
         except Exception as e:
             results["Rainbow Table"] = f"Database error: {str(e)}"
-
     else:
         results["Rainbow Table"] = "Rainbow attack disabled"
 
@@ -1524,13 +1547,17 @@ def toggle_password_visibility(entry_password, entry_confirm_password, eye_icon,
 def browse_dictionary_path(entry_widget, window):
     global sqlite_obj
     """Open file dialog to select dictionary path and save it to the database."""
+    
+    # Open the file dialog to select a folder
     path = filedialog.askdirectory(title="Select Dictionary Folder")
+    
     if path:
+        # Update the entry widget with the selected path
         entry_widget.delete(0, tk.END)
         entry_widget.insert(0, path)
         window.lift()
 
-        # Save to database
+        # Save the selected path to the database
         try:
             result = sqlite_obj.getDataFromTable(
                 "attack_settings", 
@@ -1539,27 +1566,36 @@ def browse_dictionary_path(entry_widget, window):
             )
             
             if result[1]:
-                id = result[1][0][0] 
+                id = result[1][0][0]  # Get the ID from the query result
                 
                 # Update the dictionary path in the database
-                sqlite_obj.updateInTable("attack_settings" , id , "dictionary_path" , path , commit = True , raiseError = True)
-
+                sqlite_obj.updateInTable("attack_settings", id, "dictionary_path", path, commit=True, raiseError=True)
+                messagebox.showinfo("Success", "Dictionary path saved successfully.")
             else:
-                print("No dictionary path found in the database.")
-            
+                messagebox.showwarning("Warning", "No dictionary path found in the database.")
         except Exception as e:
-            print(f"Error saving dictionary path: {e}")
+            messagebox.showerror("Error", f"Error saving dictionary path: {e}")
 
 def browse_rainbow_path(entry_widget, window):
     global sqlite_obj
-    """Open file dialog to select rainbow table path and save it to the database."""
+    """Open file dialog to select rainbow table path and save it to the database, ensuring the folder contains .rti2 files."""
+    
+    # Open the file dialog to select a folder
     path = filedialog.askdirectory(title="Select Rainbow Table Folder")
+    
     if path:
+        # Check if the folder contains any .rti2 files
+        if not any(file.endswith(".rti2") for file in os.listdir(path)):
+            # Show a message box if no .rti2 files are found
+            messagebox.showerror("Invalid Folder", "The selected folder does not contain any .rti2 files.")
+            return  # Exit if no .rti2 files are found
+
+        # Update the entry widget with the selected path
         entry_widget.delete(0, tk.END)
         entry_widget.insert(0, path)
         window.lift()
         
-        # Save to database
+        # Save the selected path to the database
         try:
             result = sqlite_obj.getDataFromTable(
                 "attack_settings", 
@@ -1568,16 +1604,15 @@ def browse_rainbow_path(entry_widget, window):
             )
             
             if result[1]:
-                id = result[1][0][0] 
+                id = result[1][0][0]  # Get the ID from the query result
                 
-                # Update the dictionary path in the database
-                sqlite_obj.updateInTable("attack_settings" , id , "rainbow_table_path" , path , commit = True , raiseError = True)
-
+                # Update the rainbow table path in the database
+                sqlite_obj.updateInTable("attack_settings", id, "rainbow_table_path", path, commit=True, raiseError=True)
+                messagebox.showinfo("Success", "Rainbow table path saved successfully.")
             else:
-                print("No rainbow table path found in the database.")
-            
+                messagebox.showwarning("Warning", "No rainbow table path found in the database.")
         except Exception as e:
-            print(f"Error saving dictionary path: {e}")
+            messagebox.showerror("Error", f"Error saving rainbow table path: {e}")
 
 def refresh_form(parent_window, dict_path_entry, rainbow_path_entry, ui_context):
     global sqlite_obj
@@ -1983,15 +2018,15 @@ def open_attack_window(parent_window, current_password, aes_bit):
 
     attack_win.protocol("WM_DELETE_WINDOW", on_attack_win_close)
 
-    def stop_attack(stop_flag):
-        stop_flag.set()
+    def stop_attack(attack_stop_flag):
+        attack_stop_flag.set()
         attack_started_flag.clear() 
         cli_output.config(state=tk.NORMAL)
         cli_output.insert(tk.END, "🛑 Attack stopped by user\n")
         cli_output.see(tk.END)
         cli_output.config(state=tk.DISABLED)
 
-    def start_attack(method, threads_str, password, aes_bit, dict_path, rainbow_path, cli, start_button, stop_button, stop_flag):
+    def start_attack(method, threads_str, password, aes_bit, dict_path, rainbow_path, cli, start_button, stop_button, attack_stop_flag):
         # First check if password is empty
         if not password or len(password.strip()) == 0:
             messagebox.showerror("Error", "Target password cannot be empty")
@@ -2009,19 +2044,19 @@ def open_attack_window(parent_window, current_password, aes_bit):
             return
 
         # Reset stop flag and enable/disable buttons
-        stop_flag.clear()
+        attack_stop_flag.clear()
         attack_started_flag.set()
         start_button.config(state=tk.DISABLED)
         stop_button.config(state=tk.NORMAL)
 
         attack_thread = threading.Thread(
             target=simulate_attack,
-            args=(method, threads, password, dict_path, rainbow_path, message_queue, start_button, stop_button, stop_flag),
+            args=(method, threads, password, dict_path, rainbow_path, message_queue, start_button, stop_button, attack_stop_flag),
             daemon=True
         )
         attack_thread.start()
 
-    def simulate_attack(method, threads, password, dict_path, rainbow_path, queue, start_button, stop_button, stop_flag): 
+    def simulate_attack(method, threads, password, dict_path, rainbow_path, queue, start_button, stop_button, attack_stop_flag): 
         def post(message):
             queue.put(message)
 
@@ -2031,13 +2066,13 @@ def open_attack_window(parent_window, current_password, aes_bit):
         post(f"⏰ Start time: {current_time}")
         post(f"🔧 Using {threads} threads")
 
-        def brute_force_worker(start_chars, charset, target, found_event, attempt_counter, stop_flag, length_status_callback):
+        def brute_force_worker(start_chars, charset, target, found_event, attempt_counter, attack_stop_flag, length_status_callback):
             max_len = len(target) + 1
             for length in range(1, max_len + 1):
                 length_status_callback(length)
                 for first in start_chars:
                     for combo in itertools.product(charset, repeat=length - 1):
-                        if found_event.is_set() or stop_flag.is_set():
+                        if found_event.is_set() or attack_stop_flag.is_set():
                             return
                         attempt = first + ''.join(combo)
                         attempt_counter[0] += 1
@@ -2069,7 +2104,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
                 start_chars = charset[i::threads]
                 t = threading.Thread(
                     target=brute_force_worker,
-                    args=(start_chars, charset, password, found_event, attempt_counter, stop_flag, length_status_callback),
+                    args=(start_chars, charset, password, found_event, attempt_counter, attack_stop_flag, length_status_callback),
                     daemon=True
                 )
                 workers.append(t)
@@ -2078,7 +2113,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
             for t in workers:
                 t.join()
 
-            if not found_event.is_set() and not stop_flag.is_set():
+            if not found_event.is_set() and not attack_stop_flag.is_set():
                 post("❌ Password not found (unexpected)")
 
         elif method == "AES Brute-Force":
@@ -2107,12 +2142,12 @@ def open_attack_window(parent_window, current_password, aes_bit):
 
             found_event = threading.Event()
             workers = []
-            attempt_counter = [0]  # reuse outer stop_flag — do NOT redefine
+            attempt_counter = [0]  # reuse outer attack_stop_flag — do NOT redefine
 
-            def aes_brute_worker(start_chars, charset, key_length, found_event, attempt_counter, stop_flag):
+            def aes_brute_worker(start_chars, charset, key_length, found_event, attempt_counter, attack_stop_flag):
                 for first_char in start_chars:
                     for tail in itertools.product(charset, repeat=key_length - 1):
-                        if found_event.is_set() or stop_flag.is_set():
+                        if found_event.is_set() or attack_stop_flag.is_set():
                             return
                         candidate_str = first_char + ''.join(tail)
                         candidate_key = candidate_str.encode().ljust(key_length, b'\0')[:key_length]
@@ -2138,7 +2173,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
                 start_chars = charset[i::threads]
                 t = threading.Thread(
                     target=aes_brute_worker,
-                    args=(start_chars, charset, key_length, found_event, attempt_counter, stop_flag),
+                    args=(start_chars, charset, key_length, found_event, attempt_counter, attack_stop_flag),
                     daemon=True
                 )
                 workers.append(t)
@@ -2147,7 +2182,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
             for t in workers:
                 t.join()
 
-            if not found_event.is_set() and not stop_flag.is_set():
+            if not found_event.is_set() and not attack_stop_flag.is_set():
                 post("❌ AES key not found in search space")
 
         elif method == "Dictionary Attack":
@@ -2178,7 +2213,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
             def dictionary_worker(file_chunk):
                 nonlocal found_info, dict_size
                 for file_path in file_chunk:
-                    if found_event.is_set() or stop_flag.is_set():
+                    if found_event.is_set() or attack_stop_flag.is_set():
                         return
 
                     try:
@@ -2188,7 +2223,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
                                 post(f"📄 Scanning dictionary file: {display_path}")
 
                             for line_num, line in enumerate(f, 1):
-                                if found_event.is_set() or stop_flag.is_set():
+                                if found_event.is_set() or attack_stop_flag.is_set():
                                     return
 
                                 word = line.strip()
@@ -2228,7 +2263,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
             if found_event.is_set():
                 post(f"✅ Password found in dictionary: {found_info['file']} (Line {found_info['line']})")
             else:
-                if not stop_flag.is_set():
+                if not attack_stop_flag.is_set():
                     post(f"❌ Password not found in any dictionary file (searched {dict_size[0]} words)")
                     post("⚡ Proceeding with brute-force excluding tried words...")
 
@@ -2236,12 +2271,12 @@ def open_attack_window(parent_window, current_password, aes_bit):
                     charset = string.ascii_letters + string.digits + string.punctuation
                     found_event = threading.Event()
 
-                    def filtered_brute_force_worker(start_chars, charset, target, found_event, attempt_counter, stop_flag):
+                    def filtered_brute_force_worker(start_chars, charset, target, found_event, attempt_counter, attack_stop_flag):
                         max_len = len(target) + 1
                         for length in range(1, max_len + 1):
                             for first in start_chars:
                                 for combo in itertools.product(charset, repeat=length - 1):
-                                    if found_event.is_set() or stop_flag.is_set():
+                                    if found_event.is_set() or attack_stop_flag.is_set():
                                         return
                                     attempt = first + ''.join(combo)
                                     if attempt in tried_set:
@@ -2257,7 +2292,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
                         start_chars = charset[i::threads]
                         t = threading.Thread(
                             target=filtered_brute_force_worker,
-                            args=(start_chars, charset, password, found_event, attempt_counter, stop_flag),
+                            args=(start_chars, charset, password, found_event, attempt_counter, attack_stop_flag),
                             daemon=True
                         )
                         workers.append(t)
@@ -2266,32 +2301,62 @@ def open_attack_window(parent_window, current_password, aes_bit):
                     for t in workers:
                         t.join()
 
-                    if not found_event.is_set() and not stop_flag.is_set():
+                    if not found_event.is_set() and not attack_stop_flag.is_set():
                         post("❌ Password not found even after brute-force")
 
-        else: # Rainbow Table
+        else:  # Rainbow Table
             try:
+                # Check if the rainbow table path contains .rti2 files
+                if not os.path.exists(rainbow_path) or not any(file.endswith('.rti2') for file in os.listdir(rainbow_path)):
+                    post("❌ No valid rainbow table (.rti2) files found in the specified directory.")
+                    attack_stop_flag.set()
+                    attack_started_flag.clear() 
+                    cli_output.config(state=tk.NORMAL)
+                    cli_output.insert(tk.END, "🛑 Attack stopped due to the error above.\n\n")
+                    cli_output.see(tk.END)
+                    cli_output.config(state=tk.DISABLED)
+                    attack_win.after(0, lambda: [
+                        start_btn.config(state=tk.NORMAL),
+                        stop_btn.config(state=tk.DISABLED),
+                        attack_started_flag.clear()
+                    ])
+                    return  # Stop the attack immediately
+                
+                # Execute command in the Crack_Rainbow_Table directory  
+                crack_dir = "./Crack_Rainbow_Table"
+                rcracki_mt_path = os.path.join(crack_dir, "rcracki_mt.exe")  # Specify the executable file path
+
+                # Check if the directory exists and if the rcracki_mt.exe file is present
+                if not os.path.exists(crack_dir) or not os.path.exists(rcracki_mt_path):
+                    if not os.path.exists(crack_dir):
+                        post(f"❌ Directory not found: {crack_dir}")
+                    if not os.path.exists(rcracki_mt_path):
+                        post(f"❌ rcracki_mt.exe not found in the directory: {crack_dir}")
+                    
+                    attack_stop_flag.set()
+                    attack_started_flag.clear()
+                    cli_output.config(state=tk.NORMAL)
+                    cli_output.insert(tk.END, "🛑 Attack stopped due to missing directory or executable.\n\n")
+                    cli_output.see(tk.END)
+                    cli_output.config(state=tk.DISABLED)
+                    
+                    attack_win.after(0, lambda: [
+                        start_btn.config(state=tk.NORMAL),
+                        stop_btn.config(state=tk.DISABLED),
+                        attack_started_flag.clear()
+                    ])
+                    return
+
                 # Generate MD5 hash of the password
                 post("🔨 Generating MD5 hash...")
                 md5_hash = hashlib.md5(password.encode()).hexdigest()
                 post(f"🔑 MD5 hash: {md5_hash}")
 
-                # Validate paths
-                if not os.path.exists(rainbow_path):
-                    post("❌ Rainbow table path not found")
-                    return
-
                 # Prepare rcracki_mt command
                 command = f"rcracki_mt -h {md5_hash} -t {threads} {rainbow_path}"
                 post(f"🖥️ Executing: {command}")
                 
-                # Execute command in the Crack_Rainbow_Table directory
-                crack_dir = "Crack_Rainbow_Table"
-                if not os.path.exists(crack_dir):
-                    post(f"❌ Directory not found: {crack_dir}")
-                    return
-
-                # With this cross-platform solution:
+                # Cross-platform solution for executing command
                 if os.name == 'nt':  # Windows
                     process = subprocess.Popen(
                         command,
@@ -2315,7 +2380,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
 
                 # Read output in real-time
                 while True:
-                    if stop_flag.is_set():
+                    if attack_stop_flag.is_set():
                         post("🛑 Stopping rainbow table attack...")
                         if os.name == 'nt':
                             os.kill(process.pid, signal.CTRL_BREAK_EVENT)
@@ -2328,12 +2393,12 @@ def open_attack_window(parent_window, current_password, aes_bit):
                         break
                     if output:
                         post(output.strip())
-
+                    
                     time.sleep(0.1)  # Prevent UI freeze
 
                 # Check final result
                 return_code = process.poll()
-                if not stop_flag.is_set():  # Only check if not stopped by user
+                if not attack_stop_flag.is_set():  # Only check if not stopped by user
                     if return_code == 0:
                         post("✅ Password found in rainbow table!")
                     else:
@@ -2345,7 +2410,7 @@ def open_attack_window(parent_window, current_password, aes_bit):
                 post(f"⚠️ Error during rainbow table attack: {str(e)}")
 
         elapsed_time = time.time() - start_time
-        if not stop_flag.is_set():
+        if not attack_stop_flag.is_set():
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             post(f"⏰ End time: {current_time}")
             post(f"🔢 Total attempts: {attempt_counter[0]:,}")
@@ -3865,11 +3930,11 @@ def save_and_reset_flag(password_id, *args, root=None):
     """Save changes and reset unsaved flag"""
     global unsaved_changes
     if password_id is not None:
-        if save_password_changes(password_id, *args):
+        if save_password_changes(password_id, *args, root=root):
             unsaved_changes = False
             show_home_content(root)  # Only call show_home_content if save is successful
     else:
-        if save_new_password(*args):
+        if save_new_password(*args, root=root):
             unsaved_changes = False
             show_home_content(root)  # Only call show_home_content if save is successful
 
@@ -3896,7 +3961,7 @@ def is_valid_input(text, max_length=255, required=True):
         return False, f"Maximum length exceeded. Please keep it under {max_length} characters."
     return True, ""
 
-def save_new_password(name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite):
+def save_new_password(name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite, root):
     global sqlite_obj
 
     # Validate input fields with specific max lengths
@@ -3966,14 +4031,15 @@ def save_new_password(name, label, user, password, confirm_password, url, notes,
         
         # Perform the insertion using sqlite_obj
         sqlite_obj.insertIntoTable("passwords", insert_data, commit=True)
+        # After successful database operation, update the UI
+        root.after(0, lambda: update_nav_bar_password_health(root))
         messagebox.showinfo("Success", "Password saved successfully")
-        update_nav_bar_password_health()
         return True  # Return success to trigger show_home_content
     except Exception as e:
         messagebox.showerror("Database Error", f"Error saving password: {str(e)}")
         return False  # Return failure, prevent further actions
 
-def save_password_changes(password_id, name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite): 
+def save_password_changes(password_id, name, label, user, password, confirm_password, url, notes, aes_bits, mp_reprompt, is_favourite, root): 
     global sqlite_obj
 
     # Validate input fields with specific max lengths
@@ -4042,8 +4108,9 @@ def save_password_changes(password_id, name, label, user, password, confirm_pass
         sqlite_obj.updateInTable("passwords", password_id , "mp_reprompt" , mp_reprompt, commit=True, raiseError=True)
         sqlite_obj.updateInTable("passwords", password_id , "isFavourite" , is_favourite, commit=True, raiseError=True)
         
+        # After successful database operation, update the UI
+        root.after(0, lambda: update_nav_bar_password_health(root))
         messagebox.showinfo("Success", "Password updated successfully")
-        update_nav_bar_password_health()
         return True  # Return success to trigger show_home_content
     except Exception as e:
         messagebox.showerror("Error", f"Failed to save changes: {str(e)}")
@@ -4069,16 +4136,36 @@ def open_aes_evaluation_window(parent_window, current_password, aes_bit_var):
     main_frame.pack(pady=10, fill=tk.BOTH, expand=True)
     main_frame.grid_columnconfigure(1, weight=1)
 
-    # Password Input
-    tk.Label(main_frame, text="Target Password:", bg="#f0f0f0").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-    password_entry = tk.Entry(main_frame, show="*")
-    password_entry.insert(0, current_password)
-    password_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-
     # Show/Hide Password Button
     show_password_icon = tk.PhotoImage(file="Images/show_password_b.png").subsample(3, 3)
     hide_password_icon = tk.PhotoImage(file="Images/hide_password_b.png").subsample(3, 3)
     settings_icon = tk.PhotoImage(file="Images/settings_b.png").subsample(3, 3)
+
+    # Master Password Test Field
+    tk.Label(main_frame, text="Test Master Password:", bg="#f0f0f0").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+    master_pw_entry = tk.Entry(main_frame, show="*")
+    master_pw_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+
+    # Show/Hide for Master Password
+    def toggle_master_visibility():
+        if master_pw_entry.cget('show') == '*':
+            master_pw_entry.config(show='')
+            master_eye_icon.config(image=show_password_icon)
+        else:
+            master_pw_entry.config(show='*')
+            master_eye_icon.config(image=hide_password_icon)
+
+    master_eye_icon = tk.Label(main_frame, image=hide_password_icon, cursor="hand2", bg="#f0f0f0")
+    master_eye_icon.grid(row=0, column=2, padx=5, pady=5, sticky="e")
+    master_eye_icon.bind("<Button-1>", lambda e: toggle_master_visibility())
+    master_eye_icon.bind("<Enter>", lambda e: show_tooltip(e.widget, "Toggle password visibility"))
+    master_eye_icon.bind("<Leave>", lambda e: hide_tooltip())
+
+    # Target Password Input
+    tk.Label(main_frame, text="Target Password:", bg="#f0f0f0").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+    password_entry = tk.Entry(main_frame, show="*")
+    password_entry.insert(0, current_password)
+    password_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
 
     def toggle_password_visibility():
         if password_entry.cget('show') == '*':
@@ -4089,53 +4176,37 @@ def open_aes_evaluation_window(parent_window, current_password, aes_bit_var):
             password_eye_icon.config(image=hide_password_icon)
 
     password_eye_icon = tk.Label(main_frame, image=hide_password_icon, cursor="hand2", bg="#f0f0f0")
-    password_eye_icon.grid(row=0, column=2, padx=5, pady=5, sticky="e")
+    password_eye_icon.grid(row=1, column=2, padx=5, pady=5, sticky="e")
     password_eye_icon.bind("<Button-1>", lambda e: toggle_password_visibility())
     password_eye_icon.bind("<Enter>", lambda e: show_tooltip(e.widget, "Toggle password visibility"))
     password_eye_icon.bind("<Leave>", lambda e: hide_tooltip())
 
-    # Get current values for guess_per_sec, thread_count, and guess_per_sec_threshold from the database
+    # Get current values for guess_per_sec from the database
     try:
-        # Fetch attack settings from the database
         result = sqlite_obj.getDataFromTable(
             "attack_settings", 
             raiseConversionError=True,
             omitID=True
         )
-
-        if result[1]:
-            # Set values if data is found
-            guess_per_sec = result[1][0][2]  # First row, first column: guess_per_sec
-        else:
-            # Set default values if no settings found
-            guess_per_sec = 3000000
-
+        guess_per_sec = result[1][0][2] if result[1] else 3000000
     except Exception as e:
         print(f"Error fetching attack settings: {e}")
-        # Set default values in case of an error
         guess_per_sec = 3000000
 
     # Guess Rate
-    tk.Label(main_frame, text="Guess Rate (per sec):", bg="#f0f0f0").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+    tk.Label(main_frame, text="Guess Rate (per sec):", bg="#f0f0f0").grid(row=2, column=0, padx=5, pady=5, sticky="w")
     guess_sec_entry = tk.Entry(main_frame)
     guess_sec_entry.insert(0, str(guess_per_sec))
-    guess_sec_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+    guess_sec_entry.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
 
     # Configure Guess Rate Button
     config_guess_rate_button = tk.Label(main_frame, image=settings_icon, cursor="hand2", bg="#f0f0f0")
-    config_guess_rate_button.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+    config_guess_rate_button.grid(row=2, column=2, padx=5, pady=5, sticky="w")
     config_guess_rate_button.bind("<Button-1>", lambda e: open_guess_rate_window(eval_win, guess_sec_entry))
-
-    # To ensure the image doesn't get garbage collected
     config_guess_rate_button.image = settings_icon
-    config_guess_rate_button.bind(
-        "<Enter>", 
-        lambda e: show_tooltip(config_guess_rate_button, "Configure guess rate settings")
-    )
-    config_guess_rate_button.bind(
-        "<Leave>", 
-        lambda e:  hide_tooltip()
-    )
+    config_guess_rate_button.bind("<Enter>", lambda e: show_tooltip(config_guess_rate_button, "Configure guess rate settings"))
+    config_guess_rate_button.bind("<Leave>", lambda e: hide_tooltip())
+
     # Evaluation Parameters Frame
     params_frame = tk.LabelFrame(main_frame, text="Evaluation Parameters", bg="#f0f0f0")
     params_frame.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
@@ -4174,6 +4245,7 @@ def open_aes_evaluation_window(parent_window, current_password, aes_bit_var):
     # Start Evaluation Button
     start_btn = tk.Button(button_frame, text="Start Evaluation", bg="#4CAF50", fg="white", width=20,
                          command=lambda: start_evaluation(
+                             master_pw_entry.get(),
                              password_entry.get(),
                              enc_time_var.get(),
                              dec_time_var.get(),
@@ -4187,88 +4259,87 @@ def open_aes_evaluation_window(parent_window, current_password, aes_bit_var):
                              eval_win
                          ))
     start_btn.grid(row=0, column=0, padx=5)
-   
+    
     # Cancel Button
     tk.Button(button_frame, text="Cancel", bg="#f44336", fg="white", width=20, command=eval_win.destroy).grid(row=0, column=1, padx=5)
     return eval_win
-    
-def start_evaluation(password, enc_time, dec_time, mem_usage, throughput, entropy, 
-                    est_aes, guess_sec, cli_output, aes_bit_var, eval_win):
-    
+
+def start_evaluation(master_password, target_password, enc_time, dec_time, mem_usage, throughput, entropy,
+                     est_aes, guess_sec, cli_output, aes_bit_var, eval_win):
+
     cli_output.config(state=tk.NORMAL)
-    
+
+    if not master_password:
+        cli_output.insert(tk.END, "Error: Master password is required\n")
+        cli_output.config(state=tk.DISABLED)
+        return
+
+    if not target_password:
+        cli_output.insert(tk.END, "Error: Target password is required\n")
+        cli_output.config(state=tk.DISABLED)
+        return
+
     results = {}
     
-    cli_output.insert(tk.END, f"\nGenerating 1 MB random plaintext for encryption and decryption tests...\n")
+    cli_output.insert(tk.END, f"\nUsing master password to derive keys...")
+    cli_output.insert(tk.END, f"\nEncrypting/decrypting target password for metrics...\n")
 
     for bits in ["128", "192", "256"]:
-        cli_output.insert(tk.END, f"\n=== Evaluating AES-{bits} ===\n")
+        cli_output.insert(tk.END, f"\n=== Evaluating AES-{bits} ===")
         
         perf = {}
         if enc_time or dec_time:
             perf = test_aes_performance(
-                int(bits), password, 
+                int(bits), master_password, target_password, 
                 enc_time, dec_time,
                 mem_usage, throughput, entropy
             )
         
         # Estimated crack times
-        est_times = estimate_crack_times_evaluation(password, int(bits), est_aes, guess_sec)
-            
+        est_times = estimate_crack_times_evaluation(target_password, int(bits), est_aes, guess_sec)
+                
         results[bits] = {
             'performance': perf,
             'estimates': est_times
         }
 
-    # Encryption Performance Summary Table
-    cli_output.insert(tk.END, "\n=== Encryption Performance Summary ===")
-    cli_output.insert(tk.END, "\nKey Size | Enc Time (ms) | Enc Mem (MB) | Enc Throughput (MB/s)")
-    cli_output.insert(tk.END, "\n-------------------------------------------------------------------------")
-    for bits in ["128", "192", "256"]:
-        perf = results[bits]['performance']
-        cli_output.insert(tk.END, 
-            f"\nAES-{bits.ljust(4)} | "
-            f"{perf.get('encryption_time', 0):12.2f} | "
-            f"{perf.get('encryption_memory', 0):12.2f} | "
-            f"{perf.get('encryption_throughput', 0):17.2f} | ")
-    
-    # Decryption Performance Summary Table
-    cli_output.insert(tk.END, "\n\n=== Decryption Performance Summary ===")
-    cli_output.insert(tk.END, "\nKey Size | Dec Time (ms) | Dec Mem (MB) | Dec Throughput (MB/s)")
-    cli_output.insert(tk.END, "\n-------------------------------------------------------------------------")
-    for bits in ["128", "192", "256"]:
-        perf = results[bits]['performance']
-        cli_output.insert(tk.END, 
-            f"\nAES-{bits.ljust(4)} | "
-            f"{perf.get('decryption_time', 0):12.2f} | "
-            f"{perf.get('decryption_memory', 0):12.2f} | "
-            f"{perf.get('decryption_throughput', 0):17.2f}")
-    
-    # Security Summary Table (Ciphertext Entropy & Estimated Crack Time)
+    # Performance Summary Tables
+    if enc_time:
+        cli_output.insert(tk.END, "\n\n=== Encryption Performance ===")
+        cli_output.insert(tk.END, "\nKey Size | Time (ms) | Memory (MB) | Throughput (ops/s)")
+        cli_output.insert(tk.END, "\n--------------------------------------------------------")
+        for bits in ["128", "192", "256"]:
+            perf = results[bits]['performance']
+            cli_output.insert(tk.END, 
+                f"\nAES-{bits.ljust(4)} | "
+                f"{perf.get('encryption_time', 0):9.6f} | "
+                f"{perf.get('encryption_memory', 0):10.6f} | "
+                f"{perf.get('encryption_throughput', 0):17.2f}")
+
+    if dec_time:
+        cli_output.insert(tk.END, "\n\n=== Decryption Performance ===")
+        cli_output.insert(tk.END, "\nKey Size | Time (ms) | Memory (MB) | Throughput (ops/s)")
+        cli_output.insert(tk.END, "\n--------------------------------------------------------")
+        for bits in ["128", "192", "256"]:
+            perf = results[bits]['performance']
+            cli_output.insert(tk.END, 
+                f"\nAES-{bits.ljust(4)} | "
+                f"{perf.get('decryption_time', 0):9.6f} | "
+                f"{perf.get('decryption_memory', 0):10.6f} | "
+                f"{perf.get('decryption_throughput', 0):17.2f}")
+
+    # Security Summary
     cli_output.insert(tk.END, "\n\n=== Security Summary ===")
-    cli_output.insert(tk.END, "\nKey Size | Ciphertext Entropy (bits) | Estimated Crack Time")
-    cli_output.insert(tk.END, "\n---------------------------------------------------------------")
+    cli_output.insert(tk.END, "\nKey Size | Entropy (bits) | Estimated Crack Time")
+    cli_output.insert(tk.END, "\n-------------------------------------------------")
     for bits in ["128", "192", "256"]:
         perf = results[bits]['performance']
         est_times = results[bits]['estimates']
-        
-        # Only show the entropy and estimated crack time if they are selected
-        entropy_display = perf.get('encryption_entropy', "N/A")
-        crack_time_display = est_times.get("AES Brute-Force", "N/A")
-        
-        cli_output.insert(tk.END, 
-            f"\nAES-{bits.ljust(4)} | "
-            f"{entropy_display:25} | "
-            f"{crack_time_display}")
+        entropy_val = perf.get('encryption_entropy', "N/A")
+        crack_time = est_times.get("AES Brute-Force", "N/A")
+        cli_output.insert(tk.END, f"\nAES-{bits.ljust(4)} | {entropy_val:14} | {crack_time}")
 
-    cli_output.insert(tk.END, "\n\nNote: AES uses different rounds based on key size:")
-    cli_output.insert(tk.END, "\n- AES-128: 10 rounds\n- AES-192: 12 rounds\n- AES-256: 14 rounds")
-    cli_output.insert(tk.END, "\nMore rounds = More computation time")
-    cli_output.insert(tk.END, "\n\nSecurity Notes:")
-    cli_output.insert(tk.END, "\n- Higher entropy indicates better randomness in ciphertext")
-    cli_output.insert(tk.END, "\n- AES-256 provides strongest security with 14 rounds")
-
-    # Determine best AES bit (example criteria)
+    # Recommendation
     best_bit = determine_best_aes(results, cli_output)
     cli_output.insert(tk.END, f"\n\nRecommended AES Bit: AES-{best_bit} (best balance of performance and security)")
     cli_output.insert(tk.END, f"\n\nNote: This recommendation is based on experimental results; however, for best security, AES-256 is strongly recommended.\n")
@@ -4276,7 +4347,7 @@ def start_evaluation(password, enc_time, dec_time, mem_usage, throughput, entrop
     
     cli_output.config(state=tk.DISABLED)
     eval_win.lift()
-    
+
 def calculate_entropy(data):
     """Calculate Shannon entropy of given data"""
     if not data:
@@ -4288,97 +4359,90 @@ def calculate_entropy(data):
         p_x = count / data_size
         entropy += -p_x * math.log2(p_x)
     return entropy
-
-def test_aes_performance(bits, password, test_enc, test_dec, test_mem, test_throughput, test_entropy):
+    
+def test_aes_performance(bits, master_password, target_password, test_enc, test_dec, test_mem, test_throughput, test_entropy):
     results = {}
-    plaintext = os.urandom(1 * 1024 * 1024)  # 1MB random data
-    key_length = bits // 8
-    
-    total_enc_time = 0
-    total_dec_time = 0
-    total_enc_memory = 0
-    total_dec_memory = 0
-    total_enc_throughput = 0
-    total_dec_throughput = 0
-    total_enc_entropy = 0
-    total_dec_entropy = 0
-    
-    try:
-        target_key = password.encode().ljust(key_length, b'\0')[:key_length]
+    plaintext = target_password.encode()
+    iterations = 1000  # Number of operations to measure
 
-        for _ in range(10):  # Run the test 10 times
-            # Encryption metrics
-            if test_enc:
-                start_time = time.perf_counter()
-                if test_mem:
-                    tracemalloc.start()
+    # Derive key from master password
+    salt = os.urandom(16)
+    key = derive_key(master_password, salt)
+    
+    # Truncate key based on AES bits
+    if bits == 128:
+        key_used = key[:16]
+    elif bits == 192:
+        key_used = key[:24]
+    else:  # 256
+        key_used = key
 
-                iv = os.urandom(12)
-                cipher = Cipher(algorithms.AES(target_key), modes.GCM(iv), backend=default_backend())
+    # Encryption metrics
+    if test_enc:
+        try:
+            # Pre-generate IVs
+            ivs = [os.urandom(12) for _ in range(iterations)]
+            
+            start_time = time.perf_counter()
+            if test_mem:
+                tracemalloc.start()
+
+            for iv in ivs:
+                cipher = Cipher(algorithms.AES(key_used), modes.GCM(iv), backend=default_backend())
                 encryptor = cipher.encryptor()
                 ciphertext = encryptor.update(plaintext) + encryptor.finalize()
 
-                if test_mem:
-                    _, peak = tracemalloc.get_traced_memory()
-                    tracemalloc.stop()
-                    total_enc_memory += peak / (1024 ** 2)  # MB
+            if test_mem:
+                _, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+                results['encryption_memory'] = peak / (1024 ** 2)  # MB
+            
+            end_time = time.perf_counter()
+            total_time = end_time - start_time
+            results['encryption_time'] = (total_time / iterations) * 1000  # ms per operation
+            results['encryption_throughput'] = iterations / total_time  # operations per second
+            
+            if test_entropy:
+                results['encryption_entropy'] = round(calculate_entropy(ciphertext), 2)
+                
+        except Exception as e:
+            print(f"Encryption test error: {str(e)}")
 
-                end_time = time.perf_counter()
-                total_enc_time += (end_time - start_time) * 1000  # ms
+    # Decryption metrics
+    if test_dec:
+        try:
+            # Generate valid ciphertext for decryption
+            iv = os.urandom(12)
+            cipher = Cipher(algorithms.AES(key_used), modes.GCM(iv), backend=default_backend())
+            encryptor = cipher.encryptor()
+            ciphertext = encryptor.update(plaintext) + encryptor.finalize()
+            tag = encryptor.tag
+            combined = iv + tag + ciphertext
 
-                if test_throughput:
-                    total_enc_throughput += (1 * 1024 * 1024) / (end_time - start_time) / (1024 ** 2)  # MB/s
+            start_time = time.perf_counter()
+            if test_mem:
+                tracemalloc.start()
 
-                if test_entropy:
-                    total_enc_entropy += calculate_entropy(ciphertext)
-
-            # Decryption metrics
-            if test_dec:
-                iv = os.urandom(12)
-                cipher = Cipher(algorithms.AES(target_key), modes.GCM(iv), backend=default_backend())
-                encryptor = cipher.encryptor()
-                ciphertext = encryptor.update(plaintext) + encryptor.finalize()
-                tag = encryptor.tag
-                combined = iv + tag + ciphertext
-
-                start_time = time.perf_counter()
-                if test_mem:
-                    tracemalloc.start()
-
-                iv = combined[:12]
-                tag = combined[12:28]
+            for _ in range(iterations):
+                iv_part = combined[:12]
+                tag_part = combined[12:28]
                 ciphertext_part = combined[28:]
-
-                cipher = Cipher(algorithms.AES(target_key), modes.GCM(iv, tag), backend=default_backend())
+                cipher = Cipher(algorithms.AES(key_used), modes.GCM(iv_part, tag_part), backend=default_backend())
                 decryptor = cipher.decryptor()
                 decrypted = decryptor.update(ciphertext_part) + decryptor.finalize()
 
-                if test_mem:
-                    _, peak = tracemalloc.get_traced_memory()
-                    tracemalloc.stop()
-                    total_dec_memory += peak / (1024 ** 2)  # MB
-
-                end_time = time.perf_counter()
-                total_dec_time += (end_time - start_time) * 1000  # ms
-
-                if test_throughput:
-                    total_dec_throughput += (1 * 1024 * 1024) / (end_time - start_time) / (1024 ** 2)  # MB/s
-
-        # Calculate average results
-        if test_enc:
-            results['encryption_time'] = total_enc_time / 10
-            results['encryption_memory'] = total_enc_memory / 10
-            results['encryption_throughput'] = total_enc_throughput / 10
-            results['encryption_entropy'] = total_enc_entropy / 10 if test_entropy else 0
-
-        if test_dec:
-            results['decryption_time'] = total_dec_time / 10
-            results['decryption_memory'] = total_dec_memory / 10
-            results['decryption_throughput'] = total_dec_throughput / 10
-
-    except Exception as e:
-        print(f"Performance test error: {str(e)}")
-        return {}
+            if test_mem:
+                _, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+                results['decryption_memory'] = peak / (1024 ** 2)  # MB
+            
+            end_time = time.perf_counter()
+            total_time = end_time - start_time
+            results['decryption_time'] = (total_time / iterations) * 1000  # ms per operation
+            results['decryption_throughput'] = iterations / total_time  # operations per second
+            
+        except Exception as e:
+            print(f"Decryption test error: {str(e)}")
 
     return results
 
@@ -4649,32 +4713,35 @@ def identify_password_issues():
     return weak_passwords, old_passwords, reused_passwords, breached_passwords
 
 # Function to update the nav bar based on password issues (to be called from another thread)
-def update_nav_bar_password_health():
+def update_nav_bar_password_health(root):
     # Start the password check in a separate thread to avoid UI blocking
     def check_and_update():
         weak_passwords, old_passwords, reused_passwords, breached_passwords = identify_password_issues()
-
-        # Check if any issue exists
         has_issues = any([weak_passwords, old_passwords, reused_passwords, breached_passwords])
 
-        # Update the nav bar label dynamically
-        if has_issues:
-            # Set the "Password Health" part to white and the "⚠️" to red
-            password_health_label.config(text="Password Health")
-            exclamation_label.config(text="⚠️", fg="#ff0000")  # Red color for exclamation mark
-        else:
-            password_health_label.config(text="Password Health", fg="white")  # Normal color for healthy state
-            exclamation_label.config(text="", fg="white")  # Remove the ⚠️ when no issues
+        # Schedule the UI update to run in the main thread
+        root.after(0, lambda: update_gui(has_issues))
+
+    def update_gui(has_issues):
+        # Only update if the window still exists
+        if root.winfo_exists():
+            if has_issues:
+                password_health_label.config(text="Password Health")
+                exclamation_label.config(text="⚠️", fg="red")
+            else:
+                password_health_label.config(text="Password Health", fg="white")
+                exclamation_label.config(text="", fg="white")
 
     # Run the check in a separate thread
     threading.Thread(target=check_and_update, daemon=True).start()
 
-# Function to trigger periodic updates of the password health indicator
 def periodic_update_nav_bar_password_health(root):
-    update_nav_bar_password_health()  # Update password health
-
-    # Call this function again after 10 seconds (10000 milliseconds)
-    root.after(10000, periodic_update_nav_bar_password_health, root)
+    update_nav_bar_password_health(root)
+    
+    if root.winfo_exists():
+        global password_health_after_id
+        # Store the after ID
+        password_health_after_id = root.after(10000, periodic_update_nav_bar_password_health, root)
 
 def show_password_health_content(root): 
     global sqlite_obj
@@ -4694,103 +4761,105 @@ def show_password_health_content(root):
     tk.Label(container, text="Password Health Checker", font=("Helvetica", 18, "bold"), bg="#f4f4f9", fg="#333333").pack(pady=10)
     tk.Label(container, text="Identify weak, old or reused passwords. Click to take action now!", font=("Helvetica", 12), bg="#f4f4f9", fg="#777777").pack(pady=3)
 
-    weak_passwords, old_passwords, reused_passwords, breached_passwords = identify_password_issues()
+    # Perform the check in the background thread
+    def show_entries():
+        weak_passwords, old_passwords, reused_passwords, breached_passwords = identify_password_issues()
 
-    # Function to show password entries with a clean layout
-    def show_entries(entries):
-        for widget in main_frame.winfo_children():
-            widget.destroy()
+        def show_entries(entries):
+            for widget in main_frame.winfo_children():
+                widget.destroy()
 
-        # Back arrow to return to main menu
-        back_arrow = tk.Label(main_frame, text="←", font=("Helvetica", 18), cursor="hand2", bg="#f4f4f9")
-        back_arrow.pack(anchor="w", padx=10, pady=5)
-        back_arrow.bind("<Button-1>", lambda e: show_password_health_content(root))
+            # Back arrow to return to main menu
+            back_arrow = tk.Label(main_frame, text="←", font=("Helvetica", 18), cursor="hand2", bg="#f4f4f9")
+            back_arrow.pack(anchor="w", padx=10, pady=5)
+            back_arrow.bind("<Button-1>", lambda e: show_password_health_content(root))
 
-        # Display password entries with modern design
-        for entry in entries:
-            entry_frame = tk.Frame(main_frame, relief=tk.RAISED, borderwidth=2, bg="#ffffff")
-            entry_frame.config(width=350, height=100)
-            entry_frame.pack_propagate(False)
-            entry_frame.pack(padx=10, pady=10)
+            # Display password entries with modern design
+            for entry in entries:
+                entry_frame = tk.Frame(main_frame, relief=tk.RAISED, borderwidth=2, bg="#ffffff")
+                entry_frame.config(width=350, height=100)
+                entry_frame.pack_propagate(False)
+                entry_frame.pack(padx=10, pady=10)
 
-            # Label for password type with modern color scheme
-            label_color = get_label_color(entry[2])
-            tag = tk.Label(entry_frame, text=entry[2], bg=label_color, fg="white", font=("Helvetica", 10), padx=5, bd=1, relief=tk.RAISED)
-            tag.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+                # Label for password type with modern color scheme
+                label_color = get_label_color(entry[2])
+                tag = tk.Label(entry_frame, text=entry[2], bg=label_color, fg="white", font=("Helvetica", 10), padx=5, bd=1, relief=tk.RAISED)
+                tag.grid(row=0, column=0, padx=10, pady=5, sticky="w")
 
-            # Platform label with aligned and easy-to-read font
-            platform_name = tk.Label(entry_frame, text=f"Platform: {truncate_text(entry[1])}", bg="white", anchor="w", width=25, font=("Helvetica", 11))
-            platform_name.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+                # Platform label with aligned and easy-to-read font
+                platform_name = tk.Label(entry_frame, text=f"Platform: {truncate_text(entry[1])}", bg="white", anchor="w", width=25, font=("Helvetica", 11))
+                platform_name.grid(row=1, column=0, padx=10, pady=5, sticky="w")
 
-            # Username label with soft color
-            user_label = tk.Label(entry_frame, text=f"Username: {truncate_text(entry[3])}", bg="white", fg="#666666", anchor="w", width=25, font=("Helvetica", 10))
-            user_label.grid(row=2, column=0, padx=10, pady=5, sticky="w")
+                # Username label with soft color
+                user_label = tk.Label(entry_frame, text=f"Username: {truncate_text(entry[3])}", bg="white", fg="#666666", anchor="w", width=25, font=("Helvetica", 10))
+                user_label.grid(row=2, column=0, padx=10, pady=5, sticky="w")
 
-            # Date modified with subtle design
-            date_modified = tk.Label(entry_frame, text=truncate_text(entry[8]), bg="white", fg="#999999", anchor="w", width=25, font=("Helvetica", 10))
-            date_modified.grid(row=3, column=0, padx=10, pady=5, sticky="w")
+                # Date modified with subtle design
+                date_modified = tk.Label(entry_frame, text=truncate_text(entry[8]), bg="white", fg="#999999", anchor="w", width=25, font=("Helvetica", 10))
+                date_modified.grid(row=3, column=0, padx=10, pady=5, sticky="w")
 
-            # Buttons container aligned nicely
-            buttons_frame = tk.Frame(entry_frame, bg="white")
-            buttons_frame.grid(row=0, column=1, rowspan=4, padx=10, pady=5, sticky="ns")
+                # Buttons container aligned nicely
+                buttons_frame = tk.Frame(entry_frame, bg="white")
+                buttons_frame.grid(row=0, column=1, rowspan=4, padx=10, pady=5, sticky="ns")
 
-            # Change Password button with modern style
-            change_button = tk.Button(buttons_frame, text="Change Password", 
-                                    command=lambda e=entry: change_password_from_health(e[0], root), bg="#4CAF50", fg="white", font=("Helvetica", 10, "bold"))
-            change_button.pack(pady=5, fill="x")
+                # Change Password button with modern style
+                change_button = tk.Button(buttons_frame, text="Change Password", 
+                                        command=lambda e=entry: change_password_from_health(e[0], root), bg="#4CAF50", fg="white", font=("Helvetica", 10, "bold"))
+                change_button.pack(pady=5, fill="x")
 
-            # Delete button with contrast color
-            delete_button = tk.Button(buttons_frame, text="Delete", command=lambda e=entry: delete_selected_entry(e[0], root), bg="#f44336", fg="white", font=("Helvetica", 10, "bold"))
-            delete_button.pack(pady=5, fill="x")
+                # Delete button with contrast color
+                delete_button = tk.Button(buttons_frame, text="Delete", command=lambda e=entry: delete_selected_entry(e[0], root), bg="#f44336", fg="white", font=("Helvetica", 10, "bold"))
+                delete_button.pack(pady=5, fill="x")
 
-        main_frame.update_idletasks()
+            main_frame.update_idletasks()
 
-    # Sections for weak, old, reused, and breached passwords with enhanced clarity
-    sections = [
-        ("Weak Passwords", len(weak_passwords), weak_passwords, "No weak passwords found.", "Weak passwords found. Click to view."),
-        ("Old Passwords", len(old_passwords), old_passwords, "No old passwords found.", "Old passwords found. Click to view."),
-        ("Reused Passwords", len(reused_passwords), reused_passwords, "No reused passwords found.", "Reused passwords found. Click to view."),
-        ("Breached Passwords", len(breached_passwords), breached_passwords, "No breached passwords found.", "Breached passwords found. Click to view.")
-    ]
+        # Sections for weak, old, reused, and breached passwords with enhanced clarity
+        sections = [
+            ("Weak Passwords", len(weak_passwords), weak_passwords, "No weak passwords found.", "Weak passwords found. Click to view."),
+            ("Old Passwords", len(old_passwords), old_passwords, "No old passwords found.", "Old passwords found. Click to view."),
+            ("Reused Passwords", len(reused_passwords), reused_passwords, "No reused passwords found.", "Reused passwords found. Click to view."),
+            ("Breached Passwords", len(breached_passwords), breached_passwords, "No breached passwords found.", "Breached passwords found. Click to view.")
+        ]
 
-    # Create a container for sections with uniform spacing
-    section_container = tk.Frame(container, bg="#f4f4f9")
-    section_container.pack(pady=10, padx=20)
+        # Create a container for sections with uniform spacing
+        section_container = tk.Frame(container, bg="#f4f4f9")
+        section_container.pack(pady=10, padx=20)
 
-    for section in sections:
-        cursor_type = "hand2" if section[1] > 0 else ""  # Set cursor to "hand2" only if there are passwords
-        frame = tk.Frame(section_container, relief=tk.RAISED, borderwidth=2, bg="white", cursor=cursor_type)
-        frame.config(width=350, height=80)
-        frame.pack_propagate(False)
-        frame.pack(pady=10, padx=10, fill="x", expand=True)
+        for section in sections:
+            cursor_type = "hand2" if section[1] > 0 else ""  # Set cursor to "hand2" only if there are passwords
+            frame = tk.Frame(section_container, relief=tk.RAISED, borderwidth=2, bg="white", cursor=cursor_type)
+            frame.config(width=350, height=80)
+            frame.pack_propagate(False)
+            frame.pack(pady=10, padx=10, fill="x", expand=True)
 
-        # Content frame inside each section for modern layout
-        content_frame = tk.Frame(frame, bg="white")
-        content_frame.pack(fill="both", expand=True, padx=12, pady=8)
+            # Content frame inside each section for modern layout
+            content_frame = tk.Frame(frame, bg="white")
+            content_frame.pack(fill="both", expand=True, padx=12, pady=8)
 
-        count_color = "green" if section[1] == 0 else "red"
-        count_label = tk.Label(content_frame, text=f"{section[1]}", font=("Helvetica", 16, "bold"), fg=count_color, bg="white")
-        count_label.pack(side=tk.TOP, pady=(6, 2))
+            count_color = "green" if section[1] == 0 else "red"
+            count_label = tk.Label(content_frame, text=f"{section[1]}", font=("Helvetica", 16, "bold"), fg=count_color, bg="white")
+            count_label.pack(side=tk.TOP, pady=(6, 2))
 
-        description = section[3] if section[1] == 0 else section[4]
-        label = tk.Label(content_frame, text=description, font=("Helvetica", 12), bg="white")
-        label.pack(side=tk.TOP, pady=(2, 6))
+            description = section[3] if section[1] == 0 else section[4]
+            label = tk.Label(content_frame, text=description, font=("Helvetica", 12), bg="white")
+            label.pack(side=tk.TOP, pady=(2, 6))
 
-        # Right arrow for action
-        arrow = tk.Label(frame, text="→", font=("Helvetica", 16), cursor="hand2", bg="white")
-        if section[1] == 0:
-            arrow.place_forget()  # Hide arrow if no passwords
-        else:
-            arrow.place(relx=0.95, rely=0.5, anchor="e")
+            # Right arrow for action
+            arrow = tk.Label(frame, text="→", font=("Helvetica", 16), cursor="hand2", bg="white")
+            if section[1] == 0:
+                arrow.place_forget()  # Hide arrow if no passwords
+            else:
+                arrow.place(relx=0.95, rely=0.5, anchor="e")
 
-        # Binding events for click actions
-        if section[1] > 0:
-            frame.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
-            content_frame.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
-            count_label.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
-            label.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
-            arrow.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
-
+            # Binding events for click actions
+            if section[1] > 0:
+                frame.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
+                content_frame.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
+                count_label.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
+                label.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
+                arrow.bind("<Button-1>", lambda e, entries=section[2]: show_entries(entries))
+        
+    threading.Thread(target=show_entries, daemon=True).start()
     def change_password_from_health(password_id, root):
         show_home_content(root)
         item_frame = None
@@ -5103,7 +5172,6 @@ def show_settings_content(root):
         # Generate 10 new recovery keys
         new_keys = [''.join(random.choices(string.ascii_uppercase + string.digits, k=8)) for _ in range(10)]
         hashed_recovery_keys = [hashlib.sha256(key.encode()).hexdigest() for key in new_keys]
-
         try:
             # Fetch existing recovery keys
             result = sqlite_obj.getDataFromTable("recovery_keys", raiseConversionError=True, omitID=False)
@@ -5111,7 +5179,6 @@ def show_settings_content(root):
             if result[1]:  # Check if there are existing keys
                 for idx, row in enumerate(result[1]):
                     row_id = int(row[0])  # Get the ID of the current row
-
                     # Update the hashed_key in the table for each row
                     sqlite_obj.updateInTable(
                         "recovery_keys", 
@@ -5121,11 +5188,9 @@ def show_settings_content(root):
                         commit=True, 
                         raiseError=True
                     )
-
         except Exception as e:
             print(f"Failed to save recovery keys: {e}")
             messagebox.showerror("Error", f"Failed to save recovery keys: {e}")
-
         # Display the new keys to the user
         for widget in keys_frame.winfo_children():
             widget.destroy()
@@ -5133,7 +5198,6 @@ def show_settings_content(root):
         all_keys = ', '.join(new_keys)
         key_grid = tk.Frame(keys_frame, bg="white")
         key_grid.pack(fill=tk.BOTH, expand=True)
-        
         # Display keys in a grid format
         for i in range(0, len(new_keys), 2):
             row_frame = tk.Frame(key_grid, bg="white")
@@ -5148,7 +5212,6 @@ def show_settings_content(root):
         copy_all_button = tk.Button(key_grid, text="Copy All Keys", font=("Helvetica", 11),
                                    command=lambda: copy_value(all_keys, root))
         copy_all_button.pack(pady=10)
-
         messagebox.showinfo("Recovery Keys Generated", "New recovery keys have been successfully generated.")
 
     def show_recovery_keys_settings():
@@ -5587,15 +5650,21 @@ def transform_key(seed: int) -> str:
 
 def decode_password(encoded: bytes, key: str) -> str:
     """XOR decoding with key rotation"""
-    return bytes([b ^ ord(key[i % len(key)]) for i, b in enumerate(encoded)]).decode()
+    # Perform XOR operation
+    decoded_bytes = bytes([b ^ ord(key[i % len(key)]) for i, b in enumerate(encoded)])
+    
+    # Convert to string, but filter non-printable characters
+    decoded_str = ''.join(chr(b) for b in decoded_bytes if 32 <= b <= 126)  # Printable ASCII range
+    
+    return decoded_str
 
 def get_db_password() -> str:
     """Retrieve password through multiple obfuscation layers"""
     # Layer 1: Encoded byte sequence (appears as random bytes)
-    encoded = b'\x12\x45\x28\x7C\x53\x69\x3F\x1A\x6E\x44\x22\x57\x31\x4A'
-    
+    encoded = b'\x44\x44\xd9\xb9\x2e\x25\xd6\xec\x99\x7f\x19\x3f\xf5\x31\x51\x74'
+
     # Layer 2: Dynamic key generation from mathematical seed
-    key_seed = 0x6F2C8A1  # Appears as a random constant
+    key_seed = 0x323755325C495F553F75286E # Appears as a random constant
     dynamic_key = transform_key(key_seed)
     
     # Layer 3: Multiple decoding passes
@@ -5605,13 +5674,449 @@ def get_db_password() -> str:
     # Layer 4: Final transformation
     return final.swapcase().translate(str.maketrans('s5!3', '$S%3'))
 
-def main(): 
+def create_directories():
+    # Check if Backup folder exists, if not, create it
+    if not os.path.exists("Backup"):
+        os.makedirs("Backup")
+
+    # Check if Rainbow_Table folder exists, if not, create it
+    if not os.path.exists("Rainbow_Table"):
+        os.makedirs("Rainbow_Table")
+
+def main():
+    # Create a mutex to prevent multiple instances (only once per process)
+    if not hasattr(main, "mutex_created"):
+        mutex = win32event.CreateMutex(None, False, "PasswordManagerAppMutex")
+        last_error = win32api.GetLastError()
+        
+        # Check if another instance is already running
+        if last_error == winerror.ERROR_ALREADY_EXISTS:
+            # Use ctypes to show message box without initializing Tkinter
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, 
+                                            "Another instance of the Password Manager is already running.", 
+                                            "Error", 
+                                            0x10)  # 0x10 = MB_ICONERROR
+            return
+        
+        # Mark mutex as created for this process
+        main.mutex_created = True
+
     global master_password
     global sqlite_obj
     global db_password 
 
+    # Create the necessary directories
+    create_directories()
+
     # Get password through obfuscation layers
     db_password = get_db_password()
+
+    # Define all inner functions at the top level of main()
+    def show_login_screen():
+        global login_root
+        login_root = tk.Tk()
+        login_root.title("Login - Password Manager")
+        login_root.geometry("550x300")
+        login_root.configure(bg="#f0f0f0")
+        
+        # Set window icon
+        login_root.iconbitmap(default="./Images/logo.ico")
+
+        # Center the window
+        window_width = 500
+        window_height = 250
+        screen_width = login_root.winfo_screenwidth()
+        screen_height = login_root.winfo_screenheight()
+        position_top = int(screen_height / 2 - window_height / 2)
+        position_right = int(screen_width / 2 - window_width / 2)
+        login_root.geometry(f'{window_width}x{window_height}+{position_right}+{position_top}')
+
+        tk.Frame(login_root, bg="#f0f0f0", height=1).pack(fill="x")  # Top lighter line
+        tk.Frame(login_root, bg="#cccccc", height=1).pack(fill="x")  # Bottom darker line
+
+        def toggle_password(entry, toggle_button):
+            if entry.cget('show') == '':
+                entry.config(show='*')
+                toggle_button.config(text='Show')
+            else:
+                entry.config(show='')
+                toggle_button.config(text='Hide')
+
+        var = tk.IntVar()
+        var.set(1)  # Default to master password
+
+        # Check lockout status first
+        is_locked, until_time = check_lockout_status()
+        
+        # Create countdown label with improved style and AM/PM formatting
+        countdown_label = tk.Label(
+            login_root,
+            text="",
+            fg="red",
+            bg="#f0f0f0",
+            font=("Arial", 14),
+            justify="center"  # Center-align multi-line text
+        )
+
+        def update_countdown(until_time):
+            remaining = until_time - datetime.now()
+            if remaining.total_seconds() <= 0:
+                countdown_label.pack_forget()
+                # Recreate login elements when lock expires
+                create_login_elements()
+                return
+            mins, secs = divmod(int(remaining.total_seconds()), 60)
+            formatted_until = until_time.strftime("%I:%M:%S %p")  # 12-hour format with AM/PM
+            countdown_label.config(
+                text=(
+                    f"⚠️ Account locked.\n"
+                    f"⏳ Time remaining: {mins:02d}:{secs:02d}\n"
+                    f"🔓 Unlock at: {formatted_until}"
+                )
+            )
+            login_root.after(1000, update_countdown, until_time)
+
+        # Show lockout status if needed
+        if is_locked:
+            countdown_label.pack(pady=50)
+            update_countdown(until_time)
+
+        def update_row_state():
+            if var.get() == 1:
+                master_password_entry.config(state='normal')
+                master_password_toggle.config(state='normal')
+                recovery_key_entry.config(state='disabled')
+                recovery_key_toggle.config(state='disabled')
+                recovery_key_cb.config(style="Disabled.TCheckbutton")
+                master_password_cb.config(style="TCheckbutton")
+            elif var.get() == 2:
+                master_password_entry.config(state='disabled')
+                master_password_toggle.config(state='disabled')
+                recovery_key_entry.config(state='normal')
+                recovery_key_toggle.config(state='normal')
+                master_password_cb.config(style="Disabled.TCheckbutton")
+                recovery_key_cb.config(style="TCheckbutton")
+
+        def on_login():
+            # Check lockout status first
+            is_locked, until_time = check_lockout_status()
+            if is_locked:
+                login_frame.pack_forget()
+                countdown_label.pack()
+                update_countdown(until_time)
+                return
+
+            if var.get() == 1:  # Master Password selected
+                master_password = master_password_entry.get()
+
+                if not master_password:  # Check if no master password is entered
+                    messagebox.showerror("Error", "No master password entered.")
+                    return
+                
+                global key
+                key = verify_master_password(master_password)
+                if not key:
+                    attempts = increment_login_attempt()
+                    remaining_attempts = 5 - attempts
+
+                    if remaining_attempts > 0:
+                        messagebox.showerror(
+                            "Invalid Password",
+                            f"Invalid password. Remaining attempts: {remaining_attempts}"
+                        )
+                    else:
+                        is_locked, until_time = check_lockout_status()
+                        if is_locked:
+                            formatted_until = until_time.strftime("%I:%M:%S %p")
+                            message = f"Your account is locked until {formatted_until}."
+                            show_alert("🔒 Account Locked", message)
+
+                            login_frame.pack_forget()
+                            countdown_label.pack_forget()  # Remove any previous countdown label
+                            countdown_label.pack(pady=50, anchor="center")  # Repack the label to ensure it's centered
+                            update_countdown(until_time)
+
+                    master_password_entry.delete(0, tk.END)
+                    return
+                else:
+                    reset_login_attempts()
+
+            elif var.get() == 2:  # Recovery Key selected
+                recovery_key = recovery_key_entry.get()
+
+                if not recovery_key:  # Check if no recovery key is entered
+                    messagebox.showerror("Error", "No recovery key entered.")
+                    return
+
+                hashed_recovery_keys = get_recovery_keys()
+                if verify_recovery_key(recovery_key, hashed_recovery_keys):
+                    reset_login_attempts()
+                    # Retrieve the stored key using sqlite_obj
+                    try:
+                        result = sqlite_obj.getDataFromTable(
+                            "master_password",
+                            raiseConversionError=True,
+                            omitID=True
+                        )
+
+                        if result[1]:
+                            stored_hashed_password = base64.b64decode(result[1][0][0])
+                            key = stored_hashed_password[16:]
+                            master_password = recovery_key
+                            login_root.withdraw()
+                            check_mfa_and_show_main_window()
+                            return
+                        else:
+                            messagebox.showerror("Error", "No recovery key found! Please enter a valid recovery key.")
+                            login_root.destroy()
+                            show_login_screen()
+                            return
+
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Failed to retrieve recovery key: {e}")
+                        login_root.destroy()
+                        show_login_screen()
+                        return
+                else:
+                    attempts = increment_login_attempt()
+                    remaining_attempts = 5 - attempts
+
+                    if remaining_attempts > 0:
+                        messagebox.showerror(
+                            "Invalid Recovery Key",
+                            f"Invalid recovery key. Remaining attempts: {remaining_attempts}"
+                        )
+                    else:
+                        is_locked, until_time = check_lockout_status()
+                        if is_locked:
+                            formatted_until = until_time.strftime("%I:%M:%S %p")
+                            message = f"Your account is locked until {formatted_until}."
+                            show_alert("🔒 Account Locked", message)
+
+                            login_frame.pack_forget()
+                            countdown_label.pack_forget()  # Remove any previous countdown label
+                            countdown_label.pack(pady=50, anchor="center")  # Repack the label to ensure it's centered
+                            update_countdown(until_time)
+
+                recovery_key_entry.delete(0, tk.END)
+                return
+
+            else:
+                messagebox.showerror("Invalid Choice", "Please select a valid option.")
+                return
+
+            login_root.withdraw()
+            check_mfa_and_show_main_window()
+
+        def create_login_elements():
+            global master_password_entry, master_password_toggle
+            global recovery_key_entry, recovery_key_toggle
+            global master_password_cb, recovery_key_cb
+            global login_frame 
+            # Clear existing elements
+            for widget in login_root.winfo_children():
+                if widget not in [countdown_label]:
+                    widget.destroy()
+
+            login_frame = tk.Frame(login_root, bg="#f0f0f0")
+            login_frame.pack(pady=10)
+
+            welcome_label = tk.Label(login_frame, text="Welcome! Please enter your master password or recovery key to proceed.", bg="#f0f0f0", font=("Helvetica", 10), fg="black")
+            welcome_label.grid(row=0, column=0, columnspan=3, pady=10)
+
+            bordered_frame = tk.Frame(login_frame, bg="#ffffff", bd=4, relief="groove")
+            bordered_frame.grid(row=1, column=0, columnspan=3, pady=5, padx=5, sticky='ew')
+
+            master_password_cb = ttk.Checkbutton(bordered_frame, text="Master Password", variable=var, onvalue=1, offvalue=0, style="TCheckbutton", command=update_row_state)
+            master_password_cb.grid(row=0, column=0, sticky='w', padx=5, pady=5)
+            master_password_entry = ttk.Entry(bordered_frame, show='*')
+            master_password_entry.grid(row=0, column=1, padx=5, pady=5)
+            master_password_toggle = ttk.Button(bordered_frame, text='Show', command=lambda: toggle_password(master_password_entry, master_password_toggle), style="TButton")
+            master_password_toggle.grid(row=0, column=2, padx=5, pady=5)
+
+            bordered_frame.grid_rowconfigure(1, minsize=20)  # Add vertical space
+
+            recovery_key_cb = ttk.Checkbutton(bordered_frame, text="Recovery Key", variable=var, onvalue=2, offvalue=0, style="Disabled.TCheckbutton", command=update_row_state)
+            recovery_key_cb.grid(row=2, column=0, sticky='w', padx=5, pady=5)
+            recovery_key_entry = ttk.Entry(bordered_frame, show='*')
+            recovery_key_entry.grid(row=2, column=1, padx=5, pady=5)
+            recovery_key_entry.config(state='disabled')  # Initially disabled
+            recovery_key_toggle = ttk.Button(bordered_frame, text='Show', command=lambda: toggle_password(recovery_key_entry, recovery_key_toggle), style="TButton")
+            recovery_key_toggle.grid(row=2, column=2, padx=5, pady=5)
+            recovery_key_toggle.config(state='disabled')  # Initially disabled
+
+            # Add login button INSIDE the login frame
+            login_button = ttk.Button(login_frame, text="Login", command=on_login, style="TButton")
+            login_button.grid(row=3, column=0, columnspan=3, pady=20)
+
+            style = ttk.Style()
+            style.configure("TButton", font=("Helvetica", 10), foreground="black")
+            style.configure("TCheckbutton", font=("Helvetica", 10), foreground="black", background="#ffffff")
+            style.configure("Disabled.TCheckbutton", font=("Helvetica", 10), foreground="grey", background="#ffffff")
+
+            # Return the frame reference
+            return login_frame
+
+        # Only create login elements if not locked
+        if not is_locked:
+            login_frame = create_login_elements()
+
+        def on_enter(event):
+            on_login()
+
+        def on_closing_login():
+            login_root.quit()  # This stops the Tkinter main loop
+            login_root.destroy()  # Destroys the Tkinter window
+            os._exit(0)   # Terminates the program completely
+            exit()
+
+        login_root.bind('<Return>', on_enter)
+        login_root.protocol("WM_DELETE_WINDOW", on_closing_login)
+
+        login_root.after(100, login_root.focus_force)
+        login_root.after(200, lambda: master_password_entry.focus())
+        login_root.mainloop()
+
+    def check_mfa_and_show_main_window():
+        global settings
+        settings = load_settings()
+        if settings[0] == 'True': # MFA is enabled
+            encrypted_otp_secret = settings[5]
+            if verify_otp(encrypted_otp_secret):
+                show_main_window()
+                if 'login_root' in globals() and login_root:
+                    login_root.destroy()  # Close login window if MFA is successful
+            else:
+                show_login_screen()
+        else:
+            show_main_window()
+            login_root.destroy()
+
+    def show_main_window():
+        global canvas, scrollbar, scroll_enabled, item_context_menu
+        root = tk.Toplevel()
+        root.protocol("WM_DELETE_WINDOW", lambda: on_closing(root))
+        root.title("Password Manager")
+        root.minsize(700, 550) 
+        root.configure(bg="#f0f0f0") # Light background color
+
+        # Set window icon
+        root.iconbitmap(default="./Images/logo.ico")
+
+        # Bind the reset_timer function to user activity events
+        root.bind_all("<Button-1>", reset_timer)
+        root.bind_all("<Key>", reset_timer)
+
+        # Create a container frame that will hold both the nav bar and the scrollable content
+        container = tk.Frame(root, bg="#f4f4f9")
+        container.pack(fill=tk.BOTH, expand=True)
+
+        # Create a navigation bar as a Frame - packed in container, not root
+        global nav_bar
+        nav_bar = tk.Frame(container, bg="#333333", height=50)
+        nav_bar.pack(side=tk.TOP, fill=tk.X)
+
+        # Add a placeholder to maintain height
+        placeholder = tk.Frame(nav_bar, width=30, height=30, bg="#333333")
+        placeholder.pack(side=tk.RIGHT, padx=10)
+
+        # Navigation options
+        home_label = tk.Label(nav_bar, text="Home", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
+        home_label.pack(side=tk.LEFT, padx=10)
+        home_label.bind("<Button-1>", lambda e: show_home_content(root))
+
+        # Password Health label with dynamic text and icon
+        global password_health_label, exclamation_label
+        password_health_label = tk.Label(nav_bar, text="Password Health", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
+        password_health_label.pack(side=tk.LEFT)
+        password_health_label.bind("<Button-1>", lambda e: show_password_health_content(root))
+
+        # Exclamation mark (⚠️) label with dynamic red color
+        exclamation_label = tk.Label(nav_bar, text="", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
+        exclamation_label.pack(side=tk.LEFT)
+        exclamation_label.bind("<Button-1>", lambda e: show_password_health_content(root))
+
+        settings_label = tk.Label(nav_bar, text="Settings", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
+        settings_label.pack(side=tk.LEFT, padx=10)
+        settings_label.bind("<Button-1>", lambda e: show_settings_content(root))
+
+        # Create a main frame with scrollbar - packed in container, below nav_bar
+        global main_frame
+        main_container = tk.Frame(container, bg="#f4f4f9")
+        main_container.pack(fill=tk.BOTH, expand=True)
+        
+        # Create a canvas for scrolling
+        canvas = tk.Canvas(main_container, bg="#f4f4f9", highlightthickness=0)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Add scrollbar
+        scrollbar = tk.Scrollbar(main_container, orient=tk.VERTICAL, command=canvas.yview)
+        
+        # Configure the canvas
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        
+        # Create main frame inside the canvas
+        main_frame = tk.Frame(canvas, bg="#f4f4f9")
+        canvas.create_window((0, 0), window=main_frame, anchor="nw")
+
+        # Add this after creating the main_frame
+        def on_frame_configure(event):
+            # Update the scrollregion to encompass the inner frame
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Center the content if the frame is smaller than the canvas
+            if main_frame.winfo_reqwidth() < canvas.winfo_width():
+                canvas.itemconfigure(1, width=canvas.winfo_width())  # 1 is the tag for the window
+
+        main_frame.bind("<Configure>", on_frame_configure)
+
+        # Initial bindings
+        bind_to_mousewheel(root)
+        bind_to_mousewheel(canvas)
+        bind_to_mousewheel(main_frame)
+
+        # Create a footer frame for the timer label
+        footer_frame = tk.Frame(container, bg="#f4f4f9", height=40)
+        footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Create a timer label inside the footer frame
+        global timer_label
+        timer_label = tk.Label(footer_frame, text="", bg="#f4f4f9", font=("Arial", 10))
+        timer_label.pack(side=tk.BOTTOM, padx=10, pady=5)
+
+        # Reset the last activity time after successful login
+        reset_timer()
+
+        schedule_backups()
+
+        # Center window
+        root.update_idletasks()
+        width = root.winfo_width()
+        height = root.winfo_height()
+        x = (root.winfo_screenwidth() - width) // 2
+        y = (root.winfo_screenheight() - height) // 2
+        root.geometry(f"+{x}+{y}")
+
+        # Store references to periodic tasks
+        global inactivity_after_id, password_health_after_id
+        inactivity_after_id = None
+        password_health_after_id = None
+        
+        # Start tasks and store their IDs
+        inactivity_after_id = root.after(1000, lambda: check_inactivity(root))
+        password_health_after_id = root.after(0, periodic_update_nav_bar_password_health, root)
+
+        show_home_content(root)
+
+        # Start checking for inactivity
+        check_inactivity(root)
+
+        # Check for password issues and update the nav bar
+        periodic_update_nav_bar_password_health(root)
+
+        # Start the main event loop
+        root.mainloop()
 
     # Check if the database exists
     if not os.path.exists(DB_FILE):
@@ -5629,406 +6134,15 @@ def main():
         setup_database()
         store_master_password(master_password)
         messagebox.showinfo("Success", "New password database created successfully!")
-        main()
+        
+        # Now call show_login_screen since we've defined it above
+        show_login_screen()
     else:
         sqlite_obj = sqlitewrapper.SqliteCipher(
             dataBasePath=DB_FILE,
             checkSameThread=False,
             password=db_password
         )
-        #Login
-        def show_login_screen():
-            global login_root
-            login_root = tk.Tk()
-            login_root.title("Login - Password Manager")
-            login_root.geometry("550x300")
-            login_root.configure(bg="#f0f0f0")
-            
-            # Set window icon
-            login_root.iconbitmap(default="./Images/logo.ico")
-
-            # Center the window
-            window_width = 500
-            window_height = 250
-            screen_width = login_root.winfo_screenwidth()
-            screen_height = login_root.winfo_screenheight()
-            position_top = int(screen_height / 2 - window_height / 2)
-            position_right = int(screen_width / 2 - window_width / 2)
-            login_root.geometry(f'{window_width}x{window_height}+{position_right}+{position_top}')
-
-            tk.Frame(login_root, bg="#f0f0f0", height=1).pack(fill="x")  # Top lighter line
-            tk.Frame(login_root, bg="#cccccc", height=1).pack(fill="x")  # Bottom darker line
-
-            def toggle_password(entry, toggle_button):
-                if entry.cget('show') == '':
-                    entry.config(show='*')
-                    toggle_button.config(text='Show')
-                else:
-                    entry.config(show='')
-                    toggle_button.config(text='Hide')
-
-            var = tk.IntVar()
-            var.set(1)  # Default to master password
-
-            # Check lockout status first
-            is_locked, until_time = check_lockout_status()
-            
-            # Create countdown label with improved style and AM/PM formatting
-            countdown_label = tk.Label(
-                login_root,
-                text="",
-                fg="red",
-                bg="#f0f0f0",
-                font=("Arial", 14),
-                justify="center"  # Center-align multi-line text
-            )
-
-            def update_countdown(until_time):
-                remaining = until_time - datetime.now()
-                if remaining.total_seconds() <= 0:
-                    countdown_label.pack_forget()
-                    # Recreate login elements when lock expires
-                    create_login_elements()
-                    return
-                mins, secs = divmod(int(remaining.total_seconds()), 60)
-                formatted_until = until_time.strftime("%I:%M:%S %p")  # 12-hour format with AM/PM
-                countdown_label.config(
-                    text=(
-                        f"⚠️ Account locked.\n"
-                        f"⏳ Time remaining: {mins:02d}:{secs:02d}\n"
-                        f"🔓 Unlock at: {formatted_until}"
-                    )
-                )
-                login_root.after(1000, update_countdown, until_time)
-
-            # Show lockout status if needed
-            if is_locked:
-                countdown_label.pack(pady=50)
-                update_countdown(until_time)
-
-            def update_row_state():
-                if var.get() == 1:
-                    master_password_entry.config(state='normal')
-                    master_password_toggle.config(state='normal')
-                    recovery_key_entry.config(state='disabled')
-                    recovery_key_toggle.config(state='disabled')
-                    recovery_key_cb.config(style="Disabled.TCheckbutton")
-                    master_password_cb.config(style="TCheckbutton")
-                elif var.get() == 2:
-                    master_password_entry.config(state='disabled')
-                    master_password_toggle.config(state='disabled')
-                    recovery_key_entry.config(state='normal')
-                    recovery_key_toggle.config(state='normal')
-                    master_password_cb.config(style="Disabled.TCheckbutton")
-                    recovery_key_cb.config(style="TCheckbutton")
-
-            def on_login():
-                # Check lockout status first
-                is_locked, until_time = check_lockout_status()
-                if is_locked:
-                    login_frame.pack_forget()
-                    countdown_label.pack()
-                    update_countdown(until_time)
-                    return
-
-                if var.get() == 1:  # Master Password selected
-                    master_password = master_password_entry.get()
-
-                    if not master_password:  # Check if no master password is entered
-                        messagebox.showerror("Error", "No master password entered.")
-                        return
-
-                    global key
-                    key = verify_master_password(master_password)
-                    if not key:
-                        attempts = increment_login_attempt()
-                        remaining_attempts = 5 - attempts
-
-                        if remaining_attempts > 0:
-                            messagebox.showerror(
-                                "Invalid Password",
-                                f"Invalid password. Remaining attempts: {remaining_attempts}"
-                            )
-                        else:
-                            is_locked, until_time = check_lockout_status()
-                            if is_locked:
-                                formatted_until = until_time.strftime("%I:%M:%S %p")
-                                message = f"Your account is locked until {formatted_until}."
-                                show_alert("🔒 Account Locked", message)
-
-                                login_frame.pack_forget()
-                                countdown_label.pack_forget()  # Remove any previous countdown label
-                                countdown_label.pack(pady=50, anchor="center")  # Repack the label to ensure it's centered
-                                update_countdown(until_time)
-
-                        master_password_entry.delete(0, tk.END)
-                        return
-                    else:
-                        reset_login_attempts()
-
-                elif var.get() == 2:  # Recovery Key selected
-                    recovery_key = recovery_key_entry.get()
-
-                    if not recovery_key:  # Check if no recovery key is entered
-                        messagebox.showerror("Error", "No recovery key entered.")
-                        return
-
-                    hashed_recovery_keys = get_recovery_keys()
-                    if verify_recovery_key(recovery_key, hashed_recovery_keys):
-                        reset_login_attempts()
-                        # Retrieve the stored key using sqlite_obj
-                        try:
-                            result = sqlite_obj.getDataFromTable(
-                                "master_password",
-                                raiseConversionError=True,
-                                omitID=True
-                            )
-
-                            if result[1]:
-                                stored_hashed_password = base64.b64decode(result[1][0][0])
-                                key = stored_hashed_password[16:]
-                                master_password = recovery_key
-                                login_root.withdraw()
-                                check_mfa_and_show_main_window()
-                                return
-                            else:
-                                messagebox.showerror("Error", "No recovery key found! Please enter a valid recovery key.")
-                                login_root.destroy()
-                                show_login_screen()
-                                return
-
-                        except Exception as e:
-                            messagebox.showerror("Error", f"Failed to retrieve recovery key: {e}")
-                            login_root.destroy()
-                            show_login_screen()
-                            return
-                    else:
-                        attempts = increment_login_attempt()
-                        remaining_attempts = 5 - attempts
-
-                        if remaining_attempts > 0:
-                            messagebox.showerror(
-                                "Invalid Recovery Key",
-                                f"Invalid recovery key. Remaining attempts: {remaining_attempts}"
-                            )
-                        else:
-                            is_locked, until_time = check_lockout_status()
-                            if is_locked:
-                                formatted_until = until_time.strftime("%I:%M:%S %p")
-                                message = f"Your account is locked until {formatted_until}."
-                                show_alert("🔒 Account Locked", message)
-
-                                login_frame.pack_forget()
-                                countdown_label.pack_forget()  # Remove any previous countdown label
-                                countdown_label.pack(pady=50, anchor="center")  # Repack the label to ensure it's centered
-                                update_countdown(until_time)
-
-                    recovery_key_entry.delete(0, tk.END)
-                    return
-
-                else:
-                    messagebox.showerror("Invalid Choice", "Please select a valid option.")
-                    return
-
-                login_root.withdraw()
-                check_mfa_and_show_main_window()
-
-            def create_login_elements():
-                global master_password_entry, master_password_toggle
-                global recovery_key_entry, recovery_key_toggle
-                global master_password_cb, recovery_key_cb
-                global login_frame 
-                # Clear existing elements
-                for widget in login_root.winfo_children():
-                    if widget not in [countdown_label]:
-                        widget.destroy()
-
-                login_frame = tk.Frame(login_root, bg="#f0f0f0")
-                login_frame.pack(pady=10)
-
-                welcome_label = tk.Label(login_frame, text="Welcome! Please enter your master password or recovery key to proceed.", bg="#f0f0f0", font=("Helvetica", 10), fg="black")
-                welcome_label.grid(row=0, column=0, columnspan=3, pady=10)
-
-                bordered_frame = tk.Frame(login_frame, bg="#ffffff", bd=4, relief="groove")
-                bordered_frame.grid(row=1, column=0, columnspan=3, pady=5, padx=5, sticky='ew')
-
-                master_password_cb = ttk.Checkbutton(bordered_frame, text="Master Password", variable=var, onvalue=1, offvalue=0, style="TCheckbutton", command=update_row_state)
-                master_password_cb.grid(row=0, column=0, sticky='w', padx=5, pady=5)
-                master_password_entry = ttk.Entry(bordered_frame, show='*')
-                master_password_entry.grid(row=0, column=1, padx=5, pady=5)
-                master_password_toggle = ttk.Button(bordered_frame, text='Show', command=lambda: toggle_password(master_password_entry, master_password_toggle), style="TButton")
-                master_password_toggle.grid(row=0, column=2, padx=5, pady=5)
-
-                bordered_frame.grid_rowconfigure(1, minsize=20)  # Add vertical space
-
-                recovery_key_cb = ttk.Checkbutton(bordered_frame, text="Recovery Key", variable=var, onvalue=2, offvalue=0, style="Disabled.TCheckbutton", command=update_row_state)
-                recovery_key_cb.grid(row=2, column=0, sticky='w', padx=5, pady=5)
-                recovery_key_entry = ttk.Entry(bordered_frame, show='*')
-                recovery_key_entry.grid(row=2, column=1, padx=5, pady=5)
-                recovery_key_entry.config(state='disabled')  # Initially disabled
-                recovery_key_toggle = ttk.Button(bordered_frame, text='Show', command=lambda: toggle_password(recovery_key_entry, recovery_key_toggle), style="TButton")
-                recovery_key_toggle.grid(row=2, column=2, padx=5, pady=5)
-                recovery_key_toggle.config(state='disabled')  # Initially disabled
-
-                # Add login button INSIDE the login frame
-                login_button = ttk.Button(login_frame, text="Login", command=on_login, style="TButton")
-                login_button.grid(row=3, column=0, columnspan=3, pady=20)
-
-                style = ttk.Style()
-                style.configure("TButton", font=("Helvetica", 10), foreground="black")
-                style.configure("TCheckbutton", font=("Helvetica", 10), foreground="black", background="#ffffff")
-                style.configure("Disabled.TCheckbutton", font=("Helvetica", 10), foreground="grey", background="#ffffff")
-
-                # Return the frame reference
-                return login_frame
-
-            # Only create login elements if not locked
-            if not is_locked:
-                login_frame = create_login_elements()
-
-            def on_enter(event):
-                on_login()
-
-            def on_closing_login():
-                login_root.destroy()
-                exit()
-
-            login_root.bind('<Return>', on_enter)
-            login_root.protocol("WM_DELETE_WINDOW", on_closing_login)
-
-            login_root.after(100, login_root.focus_force)
-            login_root.after(200, lambda: master_password_entry.focus())
-            login_root.mainloop()
-
-        def check_mfa_and_show_main_window():
-            global settings
-            settings = load_settings()
-            if settings[0] == 'True': # MFA is enabled
-                encrypted_otp_secret = settings[5]
-                if verify_otp(encrypted_otp_secret):
-                    show_main_window()
-                    login_root.destroy()  # Close login window if MFA is successful
-                else:
-                    show_login_screen()
-            else:
-                show_main_window()
-
-        def show_main_window():
-            global canvas, scrollbar, scroll_enabled, item_context_menu
-            root = tk.Toplevel()
-            root.protocol("WM_DELETE_WINDOW", lambda: on_closing(root))
-            root.title("Password Manager")
-            root.minsize(700, 550) 
-            root.configure(bg="#f0f0f0") # Light background color
-
-            # Set window icon
-            root.iconbitmap(default="./Images/logo.ico")
-
-            # Bind the reset_timer function to user activity events
-            root.bind_all("<Button-1>", reset_timer)
-            root.bind_all("<Key>", reset_timer)
-
-            # Create a container frame that will hold both the nav bar and the scrollable content
-            container = tk.Frame(root, bg="#f4f4f9")
-            container.pack(fill=tk.BOTH, expand=True)
-
-            # Create a navigation bar as a Frame - packed in container, not root
-            global nav_bar
-            nav_bar = tk.Frame(container, bg="#333333", height=50)
-            nav_bar.pack(side=tk.TOP, fill=tk.X)
-
-            # Add a placeholder to maintain height
-            placeholder = tk.Frame(nav_bar, width=30, height=30, bg="#333333")
-            placeholder.pack(side=tk.RIGHT, padx=10)
-
-            # Navigation options
-            home_label = tk.Label(nav_bar, text="Home", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
-            home_label.pack(side=tk.LEFT, padx=10)
-            home_label.bind("<Button-1>", lambda e: show_home_content(root))
-
-            # Password Health label with dynamic text and icon
-            global password_health_label, exclamation_label
-            password_health_label = tk.Label(nav_bar, text="Password Health", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
-            password_health_label.pack(side=tk.LEFT)
-            password_health_label.bind("<Button-1>", lambda e: show_password_health_content(root))
-
-            # Exclamation mark (⚠️) label with dynamic red color
-            exclamation_label = tk.Label(nav_bar, text="", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
-            exclamation_label.pack(side=tk.LEFT)
-            exclamation_label.bind("<Button-1>", lambda e: show_password_health_content(root))
-
-            settings_label = tk.Label(nav_bar, text="Settings", fg="white", bg="#333333", font=("Arial", 12), cursor="hand2")
-            settings_label.pack(side=tk.LEFT, padx=10)
-            settings_label.bind("<Button-1>", lambda e: show_settings_content(root))
-
-            # Create a main frame with scrollbar - packed in container, below nav_bar
-            global main_frame
-            main_container = tk.Frame(container, bg="#f4f4f9")
-            main_container.pack(fill=tk.BOTH, expand=True)
-            
-            # Create a canvas for scrolling
-            canvas = tk.Canvas(main_container, bg="#f4f4f9", highlightthickness=0)
-            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            
-            # Add scrollbar
-            scrollbar = tk.Scrollbar(main_container, orient=tk.VERTICAL, command=canvas.yview)
-            
-            # Configure the canvas
-            canvas.configure(yscrollcommand=scrollbar.set)
-            canvas.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-            
-            # Create main frame inside the canvas
-            main_frame = tk.Frame(canvas, bg="#f4f4f9")
-            canvas.create_window((0, 0), window=main_frame, anchor="nw")
-
-            # Add this after creating the main_frame
-            def on_frame_configure(event):
-                # Update the scrollregion to encompass the inner frame
-                canvas.configure(scrollregion=canvas.bbox("all"))
-                # Center the content if the frame is smaller than the canvas
-                if main_frame.winfo_reqwidth() < canvas.winfo_width():
-                    canvas.itemconfigure(1, width=canvas.winfo_width())  # 1 is the tag for the window
-
-            main_frame.bind("<Configure>", on_frame_configure)
-
-            # Initial bindings
-            bind_to_mousewheel(root)
-            bind_to_mousewheel(canvas)
-            bind_to_mousewheel(main_frame)
-
-            # Create a footer frame for the timer label
-            footer_frame = tk.Frame(container, bg="#f4f4f9", height=40)
-            footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
-
-            # Create a timer label inside the footer frame
-            global timer_label
-            timer_label = tk.Label(footer_frame, text="", bg="#f4f4f9", font=("Arial", 10))
-            timer_label.pack(side=tk.BOTTOM, padx=10, pady=5)
-
-            # Reset the last activity time after successful login
-            reset_timer()
-
-            schedule_backups()
-
-            # Center window
-            root.update_idletasks()
-            width = root.winfo_width()
-            height = root.winfo_height()
-            x = (root.winfo_screenwidth() - width) // 2
-            y = (root.winfo_screenheight() - height) // 2
-            root.geometry(f"+{x}+{y}")
-
-            show_home_content(root)
-
-            # Start checking for inactivity
-            check_inactivity(root)
-
-            # Check for password issues and update the nav bar
-            periodic_update_nav_bar_password_health(root)
-
-            # Start the main event loop
-            root.mainloop()
-
         show_login_screen()
 
 if __name__ == "__main__":
