@@ -13,7 +13,9 @@ Before installing the Password Manager, please ensure your system meets the foll
 
 ### 1. Download the Latest Version
 - Navigate to the top of the **Releases** section on the right side of this page.
-- Find the latest version of the `password-manager-installer.exe` file and **click on it** to download it.
+- Find the latest version of the `password-manager-installer.exe` file and **click on it** to download.
+- **Also download the `User_Manual.pdf` provided in the same release.**  
+  It contains step-by-step instructions and screenshots for usage.
 
 ### 2. Run the Installer
 - After downloading the installer, **double-click** it to run.
@@ -80,5 +82,6 @@ You’ve now successfully installed the Password Manager and optionally enabled 
 If you encounter any issues, feel free to:
 - Open an issue on this repository
 - Refer to the included documentation
+- 📖 **Refer to the `User_Manual.pdf` you downloaded** for additional help and screenshots
 
 **Happy password managing! 🛡️**
