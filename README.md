@@ -21,14 +21,18 @@ Before installing the Password Manager, please ensure your system meets the foll
 - After downloading the installer, **double-click** it to run.
 - Follow the **on-screen instructions** to complete the installation process.
 
-> ⚠️ **Important:** Do **NOT** install the application in default system folders like:
-> - `C:\Program Files`
-> - `C:\Program Files (x86)`
->
-> Instead, install it in a user-accessible directory such as:
-> - `C:\Users\YourName\Downloads\PasswordManager`
-> - `C:\Users\YourName\Documents\PasswordManager`
-> - `C:\Users\YourName\Videos\PasswordManager`
+### ⚠️ Important Installation Notice
+
+Do **NOT** install the application in default system folders like:
+- `C:\Program Files`
+- `C:\Program Files (x86)`
+
+These folders are protected by Windows and may cause file permission issues.
+
+✅ Instead, install it in a user-accessible directory such as:
+- `C:\Users\YourName\Downloads\PasswordManager`
+- `C:\Users\YourName\Documents\PasswordManager`
+- `C:\Users\YourName\Videos\PasswordManager`
 
 ### 3. Launch the Password Manager
 - Once the installation is complete, navigate to the installation folder and **launch `password_manager.exe`** to start the program.
