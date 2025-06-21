@@ -1,41 +1,96 @@
-# Password Manager Installation Guide
+# 🔒 Password Manager – Secure Offline Password Solution
 
-## Prerequisites
+This Password Manager is a secure, offline solution designed to help users manage and protect their passwords effectively. It encrypts stored credentials using **AES encryption**, with keys securely derived through **PBKDF2**, ensuring strong resistance against brute-force attacks.
 
-Before installing the Password Manager, please ensure your system meets the following requirements:
+The system addresses common password security concerns—such as weak, reused, or compromised credentials—by integrating features like:
 
-- **Windows 10 or 11** operating system.
-- **Default Storage Requirement**: At least **400 MB** of available storage for the Password Manager application.
-- **Rainbow Table Attack Feature (Optional)**:
-  - Requires **at least 100 GB** of available storage for downloading and storing the Rainbow Tables.
+- 🔑 **Password Generator** for strong, random password creation  
+- 🛡️ **Breach Checker** using the [Pwned Passwords API](https://github.com/lionheart/pwnedpasswords)  
+- 🔐 **Multi-Factor Authentication (MFA)** and a **Recovery Key** to reduce the risk of total lockout  
+- 🧠 **Password Strength Tester** that simulates real-world cracking techniques:
+  - Brute-force
+  - AES brute-force
+  - Dictionary attacks (using [SecLists](https://github.com/danielmiessler/SecLists/tree/master/Passwords))
+  - Rainbow table attacks (powered by [`rcracki_mt`](https://github.com/foreni-packages/rcracki_mt))
 
-## Installation Steps
+The app is fully offline, except for optional breach checks, offering full user data control. It also includes **performance/security analysis** tools to help users understand trade-offs in password encryption techniques.
+
+---
+
+## 🛠️ Password Manager Installation Guide
+
+### Prerequisites
+
+- Windows 10 or 11
+- Minimum 400 MB of free disk space
+- Optional: 100+ GB for Rainbow Tables (if using the Rainbow Table attack feature)
+
+---
 
 ### 1. Download the Latest Version
-- Navigate to the top of the **Releases** section on the right side of this page.
-- Find the latest version of the `password-manager-installer.exe` file and **click on it** to download.
-- **Also download the `User_Manual.pdf` provided in the same release.**  
-  It contains step-by-step instructions and screenshots for usage.
+
+- Navigate to the **[Releases section](https://github.com/Rakoim/FYP_Password_Manager/releases)**.
+- Download:
+  - `password-manager-installer.exe`
+  - `User_Manual.pdf` (for usage instructions and screenshots)
+
+---
 
 ### 2. Run the Installer
-- After downloading the installer, **double-click** it to run.
-- Follow the **on-screen instructions** to complete the installation process.
+
+- Double-click `password-manager-installer.exe`
+- Follow the on-screen installation instructions
+
+---
+
+### 🔐 SmartScreen Warning Explained
+
+Windows Defender SmartScreen may show:
+
+> "Windows protected your PC"
+
+This warning appears because the installer is **not digitally signed**.  
+Due to **budget limitations**, a trusted code-signing certificate was not purchased.
+
+✅ To proceed:
+- Click **“More info”**
+- Click **“Run anyway”**
+
+This is common for new and unsigned applications. The installer is safe.
+
+---
+
+### 🛡️ Virus Scan Verification
+
+The installer has been scanned using **VirusTotal** and is **safe to use**.
+
+- 📊 [VirusTotal Scan Report](https://www.virustotal.com/gui/file/a618a6b8e7c14ee556dca3d979e437c22f666574785ca82b0fe801ba290ccdd9/detection)
+- Detection: **1 / 70** (Bkav Pro)
+- 🧪 [Bkav false-positive details](https://hackerdose.com/malware/w32-aidetectmalware-bkav-pro/)
+
+The single alert is a **false positive**, commonly seen in unsigned applications.
+
+---
 
 ### ⚠️ Important Installation Notice
 
-Do **NOT** install the application in default system folders like:
+**Do NOT install the app into protected system directories:**
 - `C:\Program Files`
 - `C:\Program Files (x86)`
 
-These folders are protected by Windows and may cause file permission issues.
-
-✅ Instead, install it in a user-accessible directory such as:
+✅ Instead, install in user-accessible folders such as:
 - `C:\Users\YourName\Downloads\PasswordManager`
 - `C:\Users\YourName\Documents\PasswordManager`
 - `C:\Users\YourName\Videos\PasswordManager`
 
-### 3. Launch the Password Manager
-- Once the installation is complete, navigate to the installation folder and **launch `password_manager.exe`** to start the program.
+This avoids permission issues and ensures smooth operation.
+
+---
+
+### 3. Launch the App
+
+- Navigate to the installation folder
+- Run `password_manager.exe`
 
 ---
 
@@ -89,3 +144,4 @@ If you encounter any issues, feel free to:
 - 📖 **Refer to the `User_Manual.pdf` you downloaded** for additional help and screenshots
 
 **Happy password managing! 🛡️**
+
