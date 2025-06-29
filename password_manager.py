@@ -1897,6 +1897,55 @@ def open_attack_window(parent_window, current_password, aes_bit):
     cli_output = scrolledtext.ScrolledText(output_frame, state='disabled', height=10)
     cli_output.pack(fill=tk.BOTH, expand=True, pady=5)
 
+    feedback_frame = ttk.LabelFrame(main_frame, text="Password Strength Feedback", padding=10)
+    feedback_frame.pack(fill=tk.X, pady=(0, 10), padx=5)
+
+    feedback_display = tk.Label(
+        feedback_frame,
+        text="Run an attack to get feedback on password strength.",
+        font=("Arial", 10),
+        bg="#ffffff",
+        anchor="w",
+        justify=tk.LEFT,
+        wraplength=480,
+        relief=tk.SUNKEN,
+        bd=1,
+        padx=10,
+        pady=10
+    )
+    feedback_display.pack(fill=tk.X, padx=5, pady=5)
+
+    # Add this function to generate feedback
+    def generate_feedback(method, time_taken, cracked):
+        """Generate feedback based on attack method and time taken"""
+        if method == "Dictionary Attack" and cracked:
+            return "❌ Weak: Password found in dictionary. Avoid common words!"
+        
+        if method == "Rainbow Table" and cracked:
+            return "❌ Weak: Password found in rainbow table. Use stronger salt!"
+        
+        if not cracked:
+            if time_taken < 1:
+                return "⚠️ Moderate: Password not cracked but crack time is very low"
+            elif time_taken < 60:
+                return "⚠️ Moderate: Password not cracked but vulnerable to quick attacks"
+            elif time_taken < 3600:  # 1 hour
+                return "✅ Good: Password resisted attack for a reasonable time"
+            else:
+                return "✅ Excellent: Password showed strong resistance against attack"
+        
+        # For cracked passwords (brute force methods)
+        if time_taken < 1:
+            return "❌ Very Weak: Cracked instantly! Use longer password with more complexity"
+        elif time_taken < 60:
+            return "❌ Weak: Cracked in under a minute. Needs more complexity"
+        elif time_taken < 3600:  # 1 hour
+            return "⚠️ Moderate: Cracked in under an hour. Add special characters"
+        elif time_taken < 86400:  # 1 day
+            return "✅ Good: Took significant time to crack. Reasonably secure"
+        else:
+            return "✅ Excellent: Extremely resistant to cracking attempts"
+    
     # Action Buttons
     button_frame = tk.Frame(output_frame, bg="#f0f0f0")
     button_frame.pack(fill=tk.X, pady=(5, 0))
@@ -2025,6 +2074,10 @@ def open_attack_window(parent_window, current_password, aes_bit):
         cli_output.insert(tk.END, "🛑 Attack stopped by user\n")
         cli_output.see(tk.END)
         cli_output.config(state=tk.DISABLED)
+        attack_win.after(0, lambda: feedback_display.config(
+            text="⚠️ Attack interrupted. Partial results may not reflect full strength",
+            fg="orange"
+        ))
 
     def start_attack(method, threads_str, password, aes_bit, dict_path, rainbow_path, cli, start_button, stop_button, attack_stop_flag):
         # First check if password is empty
@@ -2416,6 +2469,16 @@ def open_attack_window(parent_window, current_password, aes_bit):
             post(f"🔢 Total attempts: {attempt_counter[0]:,}")
             post(f"⏱️ Time taken: {elapsed_time:.2f} seconds")
             post("🏁 Attack completed")
+            # Generate feedback
+            feedback = generate_feedback(method, elapsed_time, cracked = 1)
+
+            # Update feedback display in main thread
+            attack_win.after(0, lambda: feedback_display.config(
+                text=feedback,
+                fg="red" if "Weak" in feedback or "❌" in feedback else 
+                    "orange" if "Moderate" in feedback or "⚠️" in feedback else 
+                    "green"
+            ))
         post("")
         
         attack_started_flag.clear()
