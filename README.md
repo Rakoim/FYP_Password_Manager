@@ -4,7 +4,8 @@ This Password Manager is a secure, offline solution designed to help users manag
 
 ### 📺 Demo Video  
 Watch a full demo of the system:  
-👉 [Watch on YouTube](https://youtu.be/w1cOuZHBx-M)
+👉 [YouTube](https://youtu.be/w1cOuZHBx-M)
+
 
 The system addresses common password security concerns—such as weak, reused, or compromised credentials—by integrating features like:
 
