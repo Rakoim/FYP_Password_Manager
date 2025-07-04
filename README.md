@@ -2,10 +2,14 @@
 
 This Password Manager is a secure, offline solution designed to help users manage and protect their passwords effectively. It encrypts stored credentials using **AES encryption**, with keys securely derived through **PBKDF2**, ensuring strong resistance against brute-force attacks.
 
+---
+
 ### 📺 Demo Video  
+
 Watch a full demo of the system:  
 👉 [YouTube](https://youtu.be/w1cOuZHBx-M)
 
+---
 
 The system addresses common password security concerns—such as weak, reused, or compromised credentials—by integrating features like:
 
